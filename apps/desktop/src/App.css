@@ -1035,6 +1035,72 @@ textarea:focus-visible {
   .minutes-item { grid-template-columns: auto minmax(0, 1fr); }
 }
 
+.import-screen {
+  height: 100%;
+  padding: 48px clamp(32px, 5vw, 72px);
+  overflow-y: auto;
+}
+
+.import-selected-path {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  background: #fafafa;
+  border: 1px solid #dedfe4;
+  border-radius: 9px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.success-banner {
+  margin-top: 14px;
+  padding: 11px 14px;
+  color: #137a58;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #e8f8f1;
+  border: 1px solid #bfe8d8;
+  border-radius: 10px;
+}
+
+.transcription-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 8px;
+  padding: 12px 14px;
+  background: #f4f1ff;
+  border: 1px solid #e0ddff;
+  border-radius: 12px;
+}
+
+.progress-track {
+  flex: 1;
+  height: 8px;
+  background: #e8e6ff;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+
+.progress-text {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

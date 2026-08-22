@@ -9,12 +9,19 @@ interface RecordingDetail {
   segments: TranscriptSegment[];
 }
 
+type TranscriptionProgressEvent = {
+  recording_id: string;
+  sent_ms: number;
+  total_ms: number;
+  phase: "sending" | "finalizing" | "done";
+};
+
 function EmptyHistory() {
   return (
     <div className="empty-state">
       <span className="empty-state-icon">◎</span>
       <h2>아직 저장된 회의가 없습니다</h2>
-      <p>실시간 탭에서 첫 녹음을 시작하거나, 아래에서 기존 녹음 파일을 가져오세요.</p>
+      <p>실시간 탭에서 첫 녹음을 시작하거나, 가져오기 탭에서 기존 녹음 파일을 가져오세요.</p>
     </div>
   );
 }
@@ -28,14 +35,7 @@ export function HistoryScreen() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // 기존 오디오 파일 가져오기(record_test_data 등 로컬 녹음 파일) — 실제 파일시스템 경로를
-  // 직접 입력받는다. 리포지토리에는 어떤 오디오 파일도 커밋되지 않으므로 네이티브 파일
-  // 다이얼로그 플러그인 없이도 동작하도록 절대 경로 입력 방식으로 최소 구현한다.
-  const [importSourcePath, setImportSourcePath] = useState("");
-  const [importTitle, setImportTitle] = useState("");
-  const [isImporting, setIsImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
+  const [transcriptionProgress, setTranscriptionProgress] = useState<TranscriptionProgressEvent | null>(null);
 
   const loadRecordings = useCallback(async () => {
     setIsLoading(true);
@@ -54,6 +54,33 @@ export function HistoryScreen() {
     void loadRecordings();
   }, [loadRecordings]);
 
+  useEffect(() => {
+    if (!isTranscribing || !detail) {
+      setTranscriptionProgress(null);
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      if (cancelled) return;
+      const handler = await listen<TranscriptionProgressEvent>("transcription-progress", (event) => {
+        if (event.payload.recording_id !== detail.recording.id) return;
+        setTranscriptionProgress(event.payload);
+      });
+      if (cancelled) {
+        handler();
+        return;
+      }
+      unlisten = handler;
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+      setTranscriptionProgress(null);
+    };
+  }, [isTranscribing, detail]);
+
   const openRecording = async (id: string) => {
     setIsDetailLoading(true);
     setError(null);
@@ -64,7 +91,6 @@ export function HistoryScreen() {
         { id },
       );
       setDetail({ recording, segments });
-      // 이 녹음에 대해 이전에 생성된 회의록이 있으면 재생성 없이 바로 복원한다.
       const existingMinutes = await invoke<MinutesDraft | null>("get_minutes", {
         recordingId: id,
       });
@@ -128,27 +154,21 @@ export function HistoryScreen() {
     });
   };
 
-  const importExistingFile = async () => {
-    const sourcePath = importSourcePath.trim();
-    if (!sourcePath) return;
-    setIsImporting(true);
-    setImportError(null);
-    try {
-      const title = importTitle.trim() || sourcePath.split("/").pop() || sourcePath;
-      await invoke<Recording>("ingest_audio_file", { sourcePath, title });
-      setImportSourcePath("");
-      setImportTitle("");
-      await loadRecordings();
-    } catch (invokeError) {
-      setImportError(errorMessage(invokeError));
-    } finally {
-      setIsImporting(false);
-    }
-  };
-
   if (detail) {
     const canTranscribe = ["recorded", "failed"].includes(detail.recording.status);
     const canGenerateMinutes = detail.segments.length > 0 && !minutesDraft;
+    const progressPercent =
+      transcriptionProgress && transcriptionProgress.total_ms > 0
+        ? Math.min(100, Math.max(0, (transcriptionProgress.sent_ms / transcriptionProgress.total_ms) * 100))
+        : 0;
+    const progressText = (() => {
+      if (!transcriptionProgress) return null;
+      if (transcriptionProgress.phase === "finalizing") return "완료 처리 중...";
+      if (transcriptionProgress.phase === "done") return "완료";
+      const remainingMs = transcriptionProgress.total_ms - transcriptionProgress.sent_ms;
+      const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
+      return `약 ${remainingSec}초 남음`;
+    })();
     return (
       <div className="history-detail-screen">
         <section className="transcript-panel detail-panel">
@@ -186,6 +206,17 @@ export function HistoryScreen() {
               </button>
             )}
           </div>
+
+          {isTranscribing && (
+            <div className="transcription-progress" aria-live="polite">
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
+              </div>
+              <span className="progress-text">
+                {progressText ?? "전사 준비 중..."} {transcriptionProgress ? `${Math.round(progressPercent)}%` : ""}
+              </span>
+            </div>
+          )}
 
           <div className="transcript-list">
             {detail.segments.length > 0 ? (
@@ -262,35 +293,6 @@ export function HistoryScreen() {
           새로고침
         </button>
       </header>
-
-      <form
-        className="import-panel"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void importExistingFile();
-        }}
-      >
-        <label htmlFor="import-source-path">기존 녹음 파일 가져오기 (절대 경로)</label>
-        <div className="import-fields">
-          <input
-            id="import-source-path"
-            value={importSourcePath}
-            onChange={(event) => setImportSourcePath(event.currentTarget.value)}
-            placeholder="/Users/.../회의녹음.m4a"
-            disabled={isImporting}
-          />
-          <input
-            value={importTitle}
-            onChange={(event) => setImportTitle(event.currentTarget.value)}
-            placeholder="회의 제목(선택)"
-            disabled={isImporting}
-          />
-          <button type="submit" className="button primary" disabled={isImporting || !importSourcePath.trim()}>
-            {isImporting ? "가져오는 중..." : "가져오기"}
-          </button>
-        </div>
-        {importError && <div className="error-banner">가져오기 실패: {importError}</div>}
-      </form>
 
       {error && <div className="error-banner">목록을 불러오지 못했습니다: {error}</div>}
 
