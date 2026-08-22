@@ -1,6 +1,7 @@
 pub mod audio;
 mod commands;
 pub mod error;
+pub mod minutes;
 pub mod models;
 pub mod storage;
 pub mod stt;
@@ -41,6 +42,8 @@ pub fn run() {
             commands::get_recording_detail,
             commands::transcribe_recording,
             commands::ingest_audio_file,
+            commands::generate_minutes,
+            commands::edit_minutes_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

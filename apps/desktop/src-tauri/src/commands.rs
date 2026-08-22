@@ -3,7 +3,8 @@
 
 use crate::audio::CaptureSession;
 use crate::error::{AppError, AppResult};
-use crate::models::{Recording, RecordingStatus, TranscriptSegment};
+use crate::minutes;
+use crate::models::{MinutesDraft, MinutesItem, Recording, RecordingStatus, TranscriptSegment};
 use crate::storage::Storage;
 use crate::stt::{self, SttConfig};
 use std::path::PathBuf;
@@ -158,4 +159,64 @@ pub async fn ingest_audio_file(app: AppHandle, state: State<'_, AppState>, sourc
     };
     state.storage.insert_recording(&rec).await?;
     Ok(rec)
+}
+
+#[tauri::command]
+pub async fn generate_minutes(
+    state: State<'_, AppState>,
+    recording_id: String,
+) -> AppResult<MinutesDraft> {
+    let recording_id = Uuid::parse_str(&recording_id)
+        .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
+    let segments = state.storage.list_segments(recording_id).await?;
+    let draft = minutes::generate_minutes(recording_id, &segments).await?;
+    state.storage.save_minutes(&draft).await?;
+    Ok(draft)
+}
+
+#[tauri::command]
+pub async fn edit_minutes_item(
+    state: State<'_, AppState>,
+    recording_id: String,
+    item_id: String,
+    instruction: String,
+) -> AppResult<MinutesItem> {
+    let recording_id = Uuid::parse_str(&recording_id)
+        .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
+    let item_id = Uuid::parse_str(&item_id)
+        .map_err(|error| AppError::InvalidState(format!("bad minutes item id: {error}")))?;
+    let mut draft = state
+        .storage
+        .get_minutes(recording_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::NotFound(format!("minutes for recording {recording_id} not found"))
+        })?;
+    let original = draft
+        .decisions
+        .iter()
+        .chain(draft.action_items.iter())
+        .find(|item| item.id == item_id)
+        .cloned()
+        .ok_or_else(|| AppError::NotFound(format!("minutes item {item_id} not found")))?;
+
+    let segments = state.storage.list_segments(recording_id).await?;
+    let evidence_segments = segments
+        .into_iter()
+        .filter(|segment| original.evidence_segment_ids.contains(&segment.id))
+        .collect::<Vec<_>>();
+    let replacement_text =
+        minutes::edit_minutes_item_text(&original, &instruction, &evidence_segments).await?;
+
+    let edited = draft
+        .decisions
+        .iter_mut()
+        .chain(draft.action_items.iter_mut())
+        .find(|item| item.id == item_id)
+        .ok_or_else(|| AppError::NotFound(format!("minutes item {item_id} not found")))?;
+    edited.text = replacement_text;
+    let edited = edited.clone();
+    draft.updated_at = chrono::Utc::now();
+    state.storage.save_minutes(&draft).await?;
+    Ok(edited)
 }
