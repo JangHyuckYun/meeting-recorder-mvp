@@ -10,7 +10,7 @@ use crate::stt::{self, SttConfig};
 use std::path::PathBuf;
 use std::process::Command as ShellCommand;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 pub struct AppState {
@@ -89,7 +89,11 @@ pub async fn get_recording_detail(
 /// (infra/stt-server/) for an already-recorded WAV, persists the resulting segments, and
 /// flips the recording status. Used both for live captures and for ingested test files.
 #[tauri::command]
-pub async fn transcribe_recording(state: State<'_, AppState>, id: String) -> AppResult<Vec<TranscriptSegment>> {
+pub async fn transcribe_recording(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<Vec<TranscriptSegment>> {
     let uuid = Uuid::parse_str(&id).map_err(|e| AppError::InvalidState(format!("bad id: {e}")))?;
     let rec = state
         .storage
@@ -100,7 +104,15 @@ pub async fn transcribe_recording(state: State<'_, AppState>, id: String) -> App
     state.storage.update_status(uuid, RecordingStatus::Transcribing).await?;
     let cfg = SttConfig::default();
     let wav_path = PathBuf::from(&rec.source_path);
-    let result = stt::transcribe_wav_file(&cfg, uuid, &wav_path).await;
+    let (progress_sender, mut progress_receiver) =
+        tokio::sync::mpsc::unbounded_channel::<stt::TranscriptionProgress>();
+    tokio::spawn(async move {
+        while let Some(progress) = progress_receiver.recv().await {
+            let _ = app.emit("transcription-progress", &progress);
+        }
+    });
+    let result =
+        stt::transcribe_wav_file(&cfg, uuid, &wav_path, Some(progress_sender)).await;
     match result {
         Ok(segments) => {
             state.storage.insert_segments(&segments).await?;
