@@ -1,0 +1,61 @@
+name: meeting-recorder-stt
+
+services:
+  whisperlive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/whisperlive:0.9.0-diarization
+    container_name: meeting-recorder-whisperlive
+    restart: unless-stopped
+    command:
+      - python
+      - run_server.py
+      - --port
+      - "9090"
+      - --backend
+      - faster_whisper
+      - --faster_whisper_custom_model_path
+      - mobiuslabsgmbh/faster-whisper-large-v3-turbo
+      - --max_clients
+      - "1"
+      - --max_connection_time
+      - "600"
+      - --omp_num_threads
+      - "4"
+      - --enable_rest
+      - --rest_port
+      - "8000"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      HF_HOME: /root/.cache/huggingface
+      PYANNOTE_CACHE: /root/.cache/torch/pyannote
+      # PyTorch 2.6+ changed torch.load's default; pyannote's public
+      # WeSpeaker checkpoint still uses the legacy trusted checkpoint format.
+      TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD: "1"
+    ports:
+      - "9090:9090"
+      - "9091:8000"
+    volumes:
+      - stt-model-cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  stt-model-cache:
