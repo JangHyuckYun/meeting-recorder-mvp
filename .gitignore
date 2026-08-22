@@ -1,0 +1,36 @@
+# deps / build
+node_modules/
+dist/
+build/
+out/
+.next/
+target/
+__pycache__/
+.venv/
+*.pyc
+
+# secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+
+# test/recording media - NEVER commit
+*.m4a
+*.mp4
+*.wav
+*.mp3
+*.mov
+record_test_data/
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/
+
+# logs
+*.log
+logs/
