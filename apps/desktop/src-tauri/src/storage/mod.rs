@@ -2,8 +2,8 @@
 //! Uses runtime-checked queries (`sqlx::query`/`query_as`), never the `query!` macro, so
 //! `cargo check` never needs a live database connection at build time.
 
-use crate::error::AppResult;
-use crate::models::{Recording, RecordingStatus, TranscriptSegment};
+use crate::error::{AppError, AppResult};
+use crate::models::{MinutesDraft, MinutesItem, Recording, RecordingStatus, TranscriptSegment};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
@@ -102,6 +102,69 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(row_to_segment).collect())
+    }
+
+    pub async fn save_minutes(&self, draft: &MinutesDraft) -> AppResult<()> {
+        let decisions_json = serde_json::to_string(&draft.decisions).map_err(|error| {
+            AppError::InvalidState(format!("failed to serialize minutes decisions: {error}"))
+        })?;
+        let action_items_json = serde_json::to_string(&draft.action_items).map_err(|error| {
+            AppError::InvalidState(format!("failed to serialize minutes action items: {error}"))
+        })?;
+        sqlx::query(
+            "INSERT INTO minutes_drafts (recording_id, summary, decisions_json, action_items_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(recording_id) DO UPDATE SET summary = excluded.summary, decisions_json = excluded.decisions_json, action_items_json = excluded.action_items_json, updated_at = excluded.updated_at",
+        )
+        .bind(draft.recording_id.to_string())
+        .bind(&draft.summary)
+        .bind(decisions_json)
+        .bind(action_items_json)
+        .bind(draft.updated_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_minutes(&self, recording_id: Uuid) -> AppResult<Option<MinutesDraft>> {
+        let row = sqlx::query(
+            "SELECT recording_id, summary, decisions_json, action_items_json, updated_at FROM minutes_drafts WHERE recording_id = ?1",
+        )
+        .bind(recording_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let stored_recording_id = Uuid::parse_str(row.get::<String, _>("recording_id").as_str())
+            .map_err(|error| {
+                AppError::InvalidState(format!("invalid stored minutes recording id: {error}"))
+            })?;
+        let decisions = serde_json::from_str::<Vec<MinutesItem>>(
+            row.get::<String, _>("decisions_json").as_str(),
+        )
+        .map_err(|error| {
+            AppError::InvalidState(format!("invalid stored minutes decisions: {error}"))
+        })?;
+        let action_items = serde_json::from_str::<Vec<MinutesItem>>(
+            row.get::<String, _>("action_items_json").as_str(),
+        )
+        .map_err(|error| {
+            AppError::InvalidState(format!("invalid stored minutes action items: {error}"))
+        })?;
+        let updated_at =
+            chrono::DateTime::parse_from_rfc3339(row.get::<String, _>("updated_at").as_str())
+                .map_err(|error| {
+                    AppError::InvalidState(format!("invalid stored minutes timestamp: {error}"))
+                })?
+                .with_timezone(&chrono::Utc);
+
+        Ok(Some(MinutesDraft {
+            recording_id: stored_recording_id,
+            summary: row.get("summary"),
+            decisions,
+            action_items,
+            updated_at,
+        }))
     }
 }
 
