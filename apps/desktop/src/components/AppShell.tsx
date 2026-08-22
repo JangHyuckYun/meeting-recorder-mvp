@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-type AppView = "live" | "history";
+type AppView = "live" | "history" | "import";
 
 interface AppShellProps {
   activeView: AppView;
@@ -22,6 +22,15 @@ function HistoryIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
       <path d="M3 3v5h5M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+function ImportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v13M12 16l-4-4M12 16l4-4" />
+      <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
     </svg>
   );
 }
@@ -53,6 +62,16 @@ export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
           >
             <HistoryIcon />
             <span>히스토리</span>
+          </button>
+          <button
+            className={`nav-button ${activeView === "import" ? "active" : ""}`}
+            type="button"
+            aria-label="가져오기"
+            aria-current={activeView === "import" ? "page" : undefined}
+            onClick={() => onNavigate("import")}
+          >
+            <ImportIcon />
+            <span>가져오기</span>
           </button>
         </nav>
         <div className="profile-dot" aria-label="사용자 프로필">
