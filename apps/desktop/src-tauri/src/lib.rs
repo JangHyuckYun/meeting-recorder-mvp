@@ -43,6 +43,7 @@ pub fn run() {
             commands::transcribe_recording,
             commands::ingest_audio_file,
             commands::generate_minutes,
+            commands::get_minutes,
             commands::edit_minutes_item,
         ])
         .run(tauri::generate_context!())

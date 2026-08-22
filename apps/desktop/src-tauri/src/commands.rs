@@ -174,6 +174,19 @@ pub async fn generate_minutes(
     Ok(draft)
 }
 
+/// Returns the previously saved minutes draft for a recording, if `generate_minutes` has ever
+/// been run for it. Lets the frontend restore an existing draft instead of losing it and forcing
+/// a fresh (costly) LLM generation every time the recording detail is reopened.
+#[tauri::command]
+pub async fn get_minutes(
+    state: State<'_, AppState>,
+    recording_id: String,
+) -> AppResult<Option<MinutesDraft>> {
+    let recording_id = Uuid::parse_str(&recording_id)
+        .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
+    state.storage.get_minutes(recording_id).await
+}
+
 #[tauri::command]
 pub async fn edit_minutes_item(
     state: State<'_, AppState>,

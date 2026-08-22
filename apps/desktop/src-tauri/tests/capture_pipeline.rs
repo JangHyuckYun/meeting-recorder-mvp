@@ -82,3 +82,48 @@ async fn real_test_audio_transcribes_with_speaker_labels() {
         println!("  [{}] {}-{}ms: {}", seg.speaker_label, seg.start_ms, seg.end_ms, seg.text);
     }
 }
+
+/// SC2's second, differently-sized fixture: a longer recording than the ~27s smoke file above,
+/// so the pipeline is proven against more than one duration/speaker-count profile. WhisperLive
+/// streams at real-time pace, so full-length recordings in the corpus (30-100 min) are
+/// impractical to run in CI-scale time; `TEST_AUDIO_LONG_FILE` points at a trimmed clip cut from
+/// one of them with `ffmpeg -ss <offset> -t <secs> -c copy`, never committed to this repo.
+#[tokio::test]
+#[ignore = "requires the deployed STT server (infra/stt-server/) and a longer local audio clip"]
+async fn real_longer_test_audio_transcribes_with_speaker_labels() {
+    let src = PathBuf::from(
+        std::env::var("TEST_AUDIO_LONG_FILE")
+            .unwrap_or_else(|_| "/tmp/long-clip-등촌동18-3min.m4a".to_string()),
+    );
+    assert!(
+        src.exists(),
+        "long test fixture missing: {src:?} (set TEST_AUDIO_LONG_FILE to a trimmed clip)"
+    );
+
+    let wav = std::env::temp_dir().join(format!("stt-smoke-long-{}.wav", Uuid::new_v4()));
+    convert_m4a_to_wav(&src, &wav);
+
+    let cfg = SttConfig::default();
+    let recording_id = Uuid::new_v4();
+    let segments = stt::transcribe_wav_file(&cfg, recording_id, &wav)
+        .await
+        .expect("transcription should succeed against the live STT server");
+
+    let _ = std::fs::remove_file(&wav);
+
+    assert!(!segments.is_empty(), "expected at least one transcribed segment");
+    let distinct_speakers = segments
+        .iter()
+        .map(|s| s.speaker_label.as_str())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    println!(
+        "transcribed {} segments ({} distinct speaker labels) from {:?}",
+        segments.len(),
+        distinct_speakers,
+        src.file_name().unwrap()
+    );
+    for seg in segments.iter().take(8) {
+        println!("  [{}] {}-{}ms: {}", seg.speaker_label, seg.start_ms, seg.end_ms, seg.text);
+    }
+}

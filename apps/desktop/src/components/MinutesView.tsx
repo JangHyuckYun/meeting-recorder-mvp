@@ -1,4 +1,6 @@
 import { useState, type SyntheticEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { errorMessage } from "../formatters";
 import type { MinutesDraft, MinutesItem } from "../types";
 
 export const MOCK_MINUTES: MinutesDraft = {
@@ -31,63 +33,76 @@ export const MOCK_MINUTES: MinutesDraft = {
   ],
 };
 
-type EditableSection = "summary" | "decisions" | "action_items";
+type ItemSection = "decisions" | "action_items";
 
 interface MinutesViewProps {
   minutes?: MinutesDraft;
   compact?: boolean;
+  /**
+   * Real backend recording id. When set, clicking an item calls the live
+   * `edit_minutes_item` command against that recording instead of the mock no-op stub.
+   * Must only be passed together with a real (non-mock) `minutes` draft — mock item ids
+   * do not exist on the backend and an edit against them will fail with "not found".
+   */
+  recordingId?: string;
+  /** Called with the freshly edited text once the backend confirms the edit. */
+  onItemEdited?: (section: ItemSection, itemId: string, text: string) => void;
 }
 
-interface SectionHeaderProps {
-  title: string;
-  count?: number;
-  onEdit: () => void;
-}
-
-function SectionHeader({ title, count, onEdit }: SectionHeaderProps) {
-  return (
-    <div className="minutes-section-heading">
-      <div>
-        <h3>{title}</h3>
-        {count !== undefined && <span>{count}</span>}
-      </div>
-      <button type="button" className="text-button" onClick={onEdit}>
-        자연어로 수정
-      </button>
-    </div>
-  );
+interface EditTarget {
+  section: ItemSection;
+  item: MinutesItem;
 }
 
 function EvidenceBadge({ item }: { item: MinutesItem }) {
-  return (
-    <span className="evidence-badge">
-      근거 {item.evidence_segment_ids.length}개
-    </span>
-  );
+  return <span className="evidence-badge">근거 {item.evidence_segment_ids.length}개</span>;
 }
 
-export function MinutesView({ minutes = MOCK_MINUTES, compact = false }: MinutesViewProps) {
-  const [editing, setEditing] = useState<EditableSection | null>(null);
+export function MinutesView({ minutes = MOCK_MINUTES, compact = false, recordingId, onItemEdited }: MinutesViewProps) {
+  const [editing, setEditing] = useState<EditTarget | null>(null);
   const [instruction, setInstruction] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
-  const startEditing = (section: EditableSection) => {
-    setEditing(section);
+  const startEditing = (section: ItemSection, item: MinutesItem) => {
+    setEditing({ section, item });
     setInstruction("");
+    setEditError(null);
   };
 
-  const submitInstruction = (event: SyntheticEvent<HTMLFormElement, SubmitEvent>) => {
+  const submitInstruction = async (event: SyntheticEvent<HTMLFormElement, SubmitEvent>) => {
     event.preventDefault();
     const trimmedInstruction = instruction.trim();
     if (!editing || !trimmedInstruction) return;
 
-    console.log("edit_minutes_section", {
-      recordingId: minutes.recording_id,
-      section: editing,
-      instruction: trimmedInstruction,
-    });
-    // TODO: Connect invoke("edit_minutes_section", ...) when the backend command is available.
-    setEditing(null);
-    setInstruction("");
+    if (!recordingId) {
+      // Mock/demo mode (실시간 화면 미리보기 등): no real recording to edit against.
+      console.log("edit_minutes_item (mock, no-op)", {
+        section: editing.section,
+        itemId: editing.item.id,
+        instruction: trimmedInstruction,
+      });
+      setEditing(null);
+      setInstruction("");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setEditError(null);
+    try {
+      const updated = await invoke<MinutesItem>("edit_minutes_item", {
+        recordingId,
+        itemId: editing.item.id,
+        instruction: trimmedInstruction,
+      });
+      onItemEdited?.(editing.section, editing.item.id, updated.text);
+      setEditing(null);
+      setInstruction("");
+    } catch (invokeError) {
+      setEditError(errorMessage(invokeError));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const editor = editing ? (
@@ -98,15 +113,21 @@ export function MinutesView({ minutes = MOCK_MINUTES, compact = false }: Minutes
         autoFocus
         value={instruction}
         onChange={(event) => setInstruction(event.currentTarget.value)}
-        placeholder="예: 결정사항을 더 간결하게 정리해줘"
+        placeholder="예: 더 간결하고 격식 있게 다듬어줘"
         rows={3}
       />
+      {editError && <p className="error-banner">수정 요청 실패: {editError}</p>}
       <div className="instruction-actions">
-        <button type="button" className="button secondary" onClick={() => setEditing(null)}>
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => setEditing(null)}
+          disabled={isSubmitting}
+        >
           취소
         </button>
-        <button type="submit" className="button primary" disabled={!instruction.trim()}>
-          수정 요청
+        <button type="submit" className="button primary" disabled={!instruction.trim() || isSubmitting}>
+          {isSubmitting ? "수정 중..." : "수정 요청"}
         </button>
       </div>
     </form>
@@ -119,31 +140,33 @@ export function MinutesView({ minutes = MOCK_MINUTES, compact = false }: Minutes
           <p className="eyebrow">AI MEETING NOTES</p>
           <h2>회의록 초안</h2>
         </div>
-        <span className="draft-badge">예시 데이터</span>
+        <span className="draft-badge">{recordingId ? "AI 생성" : "예시 데이터"}</span>
       </header>
 
       <div className="minutes-scroll">
         <section className="minutes-section">
-          <SectionHeader title="요약" onEdit={() => startEditing("summary")} />
-          <button className="summary-card editable-card" type="button" onClick={() => startEditing("summary")}>
-            {minutes.summary}
-          </button>
-          {editing === "summary" && editor}
+          <div className="minutes-section-heading">
+            <div>
+              <h3>요약</h3>
+            </div>
+          </div>
+          <p className="summary-card">{minutes.summary}</p>
         </section>
 
         <section className="minutes-section">
-          <SectionHeader
-            title="결정 사항"
-            count={minutes.decisions.length}
-            onEdit={() => startEditing("decisions")}
-          />
+          <div className="minutes-section-heading">
+            <div>
+              <h3>결정 사항</h3>
+              <span>{minutes.decisions.length}</span>
+            </div>
+          </div>
           <div className="minutes-card-list">
             {minutes.decisions.map((item) => (
               <button
                 className="minutes-item decision editable-card"
                 type="button"
                 key={item.id}
-                onClick={() => startEditing("decisions")}
+                onClick={() => startEditing("decisions", item)}
               >
                 <span className="item-marker">✓</span>
                 <span className="item-copy">{item.text}</span>
@@ -151,22 +174,23 @@ export function MinutesView({ minutes = MOCK_MINUTES, compact = false }: Minutes
               </button>
             ))}
           </div>
-          {editing === "decisions" && editor}
+          {editing?.section === "decisions" && editor}
         </section>
 
         <section className="minutes-section">
-          <SectionHeader
-            title="할 일"
-            count={minutes.action_items.length}
-            onEdit={() => startEditing("action_items")}
-          />
+          <div className="minutes-section-heading">
+            <div>
+              <h3>할 일</h3>
+              <span>{minutes.action_items.length}</span>
+            </div>
+          </div>
           <div className="minutes-card-list">
             {minutes.action_items.map((item, index) => (
               <button
                 className="minutes-item action editable-card"
                 type="button"
                 key={item.id}
-                onClick={() => startEditing("action_items")}
+                onClick={() => startEditing("action_items", item)}
               >
                 <span className="item-number">{String(index + 1).padStart(2, "0")}</span>
                 <span className="item-copy">{item.text}</span>
@@ -174,7 +198,7 @@ export function MinutesView({ minutes = MOCK_MINUTES, compact = false }: Minutes
               </button>
             ))}
           </div>
-          {editing === "action_items" && editor}
+          {editing?.section === "action_items" && editor}
         </section>
       </div>
     </section>
