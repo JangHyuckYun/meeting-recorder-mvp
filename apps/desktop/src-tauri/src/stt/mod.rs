@@ -5,9 +5,15 @@
 
 use crate::error::{AppError, AppResult};
 use crate::models::TranscriptSegment;
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
+use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -29,6 +35,22 @@ impl Default for SttConfig {
             diarization_threshold: 0.55,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TranscriptionProgress {
+    pub recording_id: Uuid,
+    pub sent_ms: i64,
+    pub total_ms: i64,
+    pub phase: ProgressPhase,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProgressPhase {
+    Sending,
+    Finalizing,
+    Done,
 }
 
 #[derive(Serialize)]
@@ -72,54 +94,26 @@ struct ServerMessage {
     message: Option<String>,
 }
 
-/// Transcribes a 16-bit mono PCM WAV file end-to-end against the WhisperLive server: opens a
-/// WebSocket, sends the diarization-enabled session config, streams the decoded PCM as f32
-/// frames, and collects every `completed` segment into `TranscriptSegment`s.
-pub async fn transcribe_wav_file(
-    cfg: &SttConfig,
-    recording_id: Uuid,
-    wav_path: &std::path::Path,
-) -> AppResult<Vec<TranscriptSegment>> {
-    let mut reader = hound::WavReader::open(wav_path)
-        .map_err(|e| AppError::Audio(format!("failed to open wav {wav_path:?}: {e}")))?;
-    let spec = reader.spec();
-    let samples_f32: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Int => reader
-            .samples::<i16>()
-            .map(|s| s.map(|v| v as f32 / i16::MAX as f32))
-            .collect::<Result<_, _>>()
-            .map_err(|e| AppError::Audio(format!("wav decode error: {e}")))?,
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .collect::<Result<_, _>>()
-            .map_err(|e| AppError::Audio(format!("wav decode error: {e}")))?,
-    };
+struct ReceivedSegment {
+    start_ms: i64,
+    end_ms: i64,
+    speaker_label: String,
+    text: String,
+}
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(&cfg.ws_url)
-        .await
-        .map_err(|e| AppError::WebSocket(format!("connect to {}: {e}", cfg.ws_url)))?;
-    let (mut write, read) = ws_stream.split();
+type SttWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WebSocketWrite = SplitSink<SttWebSocket, Message>;
+type WebSocketRead = SplitStream<SttWebSocket>;
 
-    // The reader runs CONCURRENTLY with sending, not after it. tokio-tungstenite only answers
-    // the server's keepalive Ping frames with a Pong while the stream is actively being polled;
-    // for a multi-minute recording, sending everything first and only then starting to read
-    // leaves Pings unanswered long enough that the server tears the connection down with a
-    // "keepalive ping timeout" 1011 error before any segments are ever received (confirmed
-    // against the live deployment with a 3-minute clip — a sequential send-then-read pipeline
-    // died with a broken pipe around the 50s mark). Spawning the reader first, before the
-    // handshake is even sent, keeps Pong responses flowing for the whole session.
-    let reader_recording_id = recording_id;
-    let reader = tokio::spawn(async move {
-        let mut read = read;
-        // WhisperLive resends the growing "last N segments" list on every message as the
-        // sliding transcription window advances, so the same segment (same start/end) can
-        // appear `completed: true` more than once — often with speaker/text refined between
-        // resends. Key by (start, end) and overwrite so the LAST version (most refined) wins.
-        let mut completed: std::collections::BTreeMap<(String, String), ServerSegment> =
-            std::collections::BTreeMap::new();
+fn spawn_reader(
+    mut read: WebSocketRead,
+    recording_offset_ms: i64,
+    segment_sender: UnboundedSender<ReceivedSegment>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
         while let Some(msg) = read.next().await {
             let msg = match msg {
-                Ok(m) => m,
+                Ok(message) => message,
                 Err(_) => break,
             };
             match msg {
@@ -128,17 +122,28 @@ pub async fn transcribe_wav_file(
                         break;
                     }
                     if let Ok(parsed) = serde_json::from_str::<ServerMessage>(&text) {
-                        if let Some(segs) = parsed.segments {
-                            for seg in segs {
-                                if seg.completed {
-                                    completed.insert((seg.start.clone(), seg.end.clone()), seg);
+                        if let Some(segments) = parsed.segments {
+                            for segment in segments {
+                                if !segment.completed {
+                                    continue;
                                 }
+                                let (Ok(start), Ok(end)) =
+                                    (segment.start.parse::<f64>(), segment.end.parse::<f64>())
+                                else {
+                                    continue;
+                                };
+                                let _ = segment_sender.send(ReceivedSegment {
+                                    start_ms: recording_offset_ms + (start * 1000.0) as i64,
+                                    end_ms: recording_offset_ms + (end * 1000.0) as i64,
+                                    speaker_label: segment
+                                        .speaker
+                                        .unwrap_or_else(|| "화자 미확인".to_string()),
+                                    text: segment.text.trim().to_string(),
+                                });
                             }
                         }
-                        if let Some(m) = parsed.message {
-                            if m == "DISCONNECT" {
-                                break;
-                            }
+                        if parsed.message.as_deref() == Some("DISCONNECT") {
+                            break;
                         }
                     }
                 }
@@ -146,26 +151,119 @@ pub async fn transcribe_wav_file(
                 _ => {}
             }
         }
+    })
+}
 
-        let mut result: Vec<TranscriptSegment> = completed
-            .into_values()
-            .filter_map(|s| {
-                let start = s.start.parse::<f64>().ok()?;
-                let end = s.end.parse::<f64>().ok()?;
-                Some(TranscriptSegment {
-                    id: Uuid::new_v4(),
-                    recording_id: reader_recording_id,
-                    start_ms: (start * 1000.0) as i64,
-                    end_ms: (end * 1000.0) as i64,
-                    speaker_label: s.speaker.unwrap_or_else(|| "화자 미확인".to_string()),
-                    text: s.text.trim().to_string(),
-                    is_final: true,
-                })
-            })
-            .collect();
-        result.sort_by_key(|seg| seg.start_ms);
-        result
-    });
+async fn open_session(
+    cfg: &SttConfig,
+    handshake_json: &str,
+    recording_offset_ms: i64,
+    segment_sender: UnboundedSender<ReceivedSegment>,
+) -> Result<(WebSocketWrite, JoinHandle<()>), String> {
+    let (ws_stream, _) = tokio_tungstenite::connect_async(&cfg.ws_url)
+        .await
+        .map_err(|error| format!("connect to {}: {error}", cfg.ws_url))?;
+    let (mut write, read) = ws_stream.split();
+
+    // Start polling before sending the handshake so keepalive Pings are always answered while
+    // a recording is streamed at real-time speed.
+    let reader = spawn_reader(read, recording_offset_ms, segment_sender);
+    if let Err(error) = write.send(Message::Text(handshake_json.to_string())).await {
+        reader.abort();
+        let _ = reader.await;
+        return Err(format!("send handshake: {error}"));
+    }
+
+    Ok((write, reader))
+}
+
+fn is_retryable_connection_error(error: &WebSocketError) -> bool {
+    matches!(
+        error,
+        WebSocketError::Io(_)
+            | WebSocketError::Tls(_)
+            | WebSocketError::ConnectionClosed
+            | WebSocketError::AlreadyClosed
+            | WebSocketError::Protocol(
+                ProtocolError::SendAfterClosing
+                    | ProtocolError::ReceivedAfterClosing
+                    | ProtocolError::ResetWithoutClosingHandshake
+            )
+    )
+}
+
+async fn reconnect_after_send_error(
+    cfg: &SttConfig,
+    handshake_json: &str,
+    recording_offset_ms: i64,
+    segment_sender: UnboundedSender<ReceivedSegment>,
+    session: (WebSocketWrite, JoinHandle<()>),
+    send_context: &str,
+    send_error: WebSocketError,
+) -> AppResult<(WebSocketWrite, JoinHandle<()>)> {
+    let (write, reader) = session;
+    drop(write);
+    reader.abort();
+    let _ = reader.await;
+
+    open_session(cfg, handshake_json, recording_offset_ms, segment_sender)
+        .await
+        .map_err(|reconnect_error| {
+            AppError::WebSocket(format!(
+                "{send_context} failed ({send_error}); reconnect attempt failed: {reconnect_error}"
+            ))
+        })
+}
+
+fn pcm_frame(samples: &[f32]) -> Message {
+    let mut bytes = Vec::with_capacity(samples.len() * 4);
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    Message::Binary(bytes)
+}
+
+fn send_progress(
+    progress_sender: Option<&UnboundedSender<TranscriptionProgress>>,
+    recording_id: Uuid,
+    sent_ms: i64,
+    total_ms: i64,
+    phase: ProgressPhase,
+) {
+    if let Some(sender) = progress_sender {
+        let _ = sender.send(TranscriptionProgress {
+            recording_id,
+            sent_ms,
+            total_ms,
+            phase,
+        });
+    }
+}
+
+/// Transcribes a 16-bit mono PCM WAV file end-to-end against the WhisperLive server: opens a
+/// WebSocket, sends the diarization-enabled session config, streams the decoded PCM as f32
+/// frames, and collects every `completed` segment into `TranscriptSegment`s.
+pub async fn transcribe_wav_file(
+    cfg: &SttConfig,
+    recording_id: Uuid,
+    wav_path: &std::path::Path,
+    progress_sender: Option<UnboundedSender<TranscriptionProgress>>,
+) -> AppResult<Vec<TranscriptSegment>> {
+    let mut wav_reader = hound::WavReader::open(wav_path)
+        .map_err(|error| AppError::Audio(format!("failed to open wav {wav_path:?}: {error}")))?;
+    let spec = wav_reader.spec();
+    let samples_f32: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Int => wav_reader
+            .samples::<i16>()
+            .map(|sample| sample.map(|value| value as f32 / i16::MAX as f32))
+            .collect::<Result<_, _>>()
+            .map_err(|error| AppError::Audio(format!("wav decode error: {error}")))?,
+        hound::SampleFormat::Float => wav_reader
+            .samples::<f32>()
+            .collect::<Result<_, _>>()
+            .map_err(|error| AppError::Audio(format!("wav decode error: {error}")))?,
+    };
+    let total_ms = samples_f32.len() as i64 * 1000 / i64::from(spec.sample_rate);
 
     let handshake = SessionConfig {
         uid: recording_id.to_string(),
@@ -185,61 +283,159 @@ pub async fn transcribe_wav_file(
         audio_format: "float32",
     };
     let handshake_json = serde_json::to_string(&handshake)
-        .map_err(|e| AppError::WebSocket(format!("serialize handshake: {e}")))?;
-    write
-        .send(Message::Text(handshake_json))
-        .await
-        .map_err(|e| AppError::WebSocket(format!("send handshake: {e}")))?;
+        .map_err(|error| AppError::WebSocket(format!("serialize handshake: {error}")))?;
 
-    // Stream PCM in ~4096-sample chunks (~256ms at 16kHz) as raw little-endian f32 bytes, the
-    // format WhisperLive's client reference implementation uses over the websocket. WhisperLive
-    // runs VAD + ASR on an internal timer against whatever audio has arrived so far, so chunks
-    // MUST be paced close to real-time — blasting the whole file instantly races the server's
-    // processing thread and yields zero segments (confirmed against the live deployment: only
-    // the first ~1.3s of audio was ever buffered before the session tore down). A few seconds
-    // of trailing silence after the real audio gives VAD room to flush the final segment before
-    // END_OF_AUDIO, mirroring the reference client behavior that was verified to work.
+    let (segment_sender, mut segment_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (mut write, mut reader) = open_session(cfg, &handshake_json, 0, segment_sender.clone())
+        .await
+        .map_err(AppError::WebSocket)?;
+
+    // WhisperLive runs VAD + ASR on an internal timer against audio received so far, so these
+    // chunks MUST remain paced close to real time. Blasting the file races the processing thread
+    // and produces incomplete or empty transcription results.
     const CHUNK: usize = 4096;
     let chunk_duration = std::time::Duration::from_secs_f64(CHUNK as f64 / spec.sample_rate as f64);
-    fn pcm_frame(samples: &[f32]) -> Message {
-        let mut bytes = Vec::with_capacity(samples.len() * 4);
-        for s in samples {
-            bytes.extend_from_slice(&s.to_le_bytes());
+    let audio_chunk_count = samples_f32.len().div_ceil(CHUNK);
+    let mut audio_chunk_index = 0;
+    let mut retried = false;
+
+    while audio_chunk_index < audio_chunk_count {
+        let chunk_start = audio_chunk_index * CHUNK;
+        let chunk_end = (chunk_start + CHUNK).min(samples_f32.len());
+        match write
+            .send(pcm_frame(&samples_f32[chunk_start..chunk_end]))
+            .await
+        {
+            Ok(()) => {
+                audio_chunk_index += 1;
+                let sent_samples = (audio_chunk_index * CHUNK).min(samples_f32.len());
+                let sent_ms = sent_samples as i64 * 1000 / i64::from(spec.sample_rate);
+                send_progress(
+                    progress_sender.as_ref(),
+                    recording_id,
+                    sent_ms,
+                    total_ms,
+                    ProgressPhase::Sending,
+                );
+                tokio::time::sleep(chunk_duration).await;
+            }
+            Err(error) if is_retryable_connection_error(&error) && !retried => {
+                let recording_offset_ms = chunk_start as i64 * 1000 / i64::from(spec.sample_rate);
+                (write, reader) = reconnect_after_send_error(
+                    cfg,
+                    &handshake_json,
+                    recording_offset_ms,
+                    segment_sender.clone(),
+                    (write, reader),
+                    "send audio chunk",
+                    error,
+                )
+                .await?;
+                retried = true;
+            }
+            Err(error) if is_retryable_connection_error(&error) => {
+                return Err(AppError::WebSocket(format!(
+                    "send audio chunk failed after one reconnect: {error}"
+                )));
+            }
+            Err(error) => {
+                return Err(AppError::WebSocket(format!("send audio chunk: {error}")));
+            }
         }
-        Message::Binary(bytes)
-    }
-    for chunk in samples_f32.chunks(CHUNK) {
-        write
-            .send(pcm_frame(chunk))
-            .await
-            .map_err(|e| AppError::WebSocket(format!("send audio chunk: {e}")))?;
-        tokio::time::sleep(chunk_duration).await;
     }
 
+    // A few seconds of trailing silence gives VAD room to flush the final real-audio segment.
     const TRAILING_SILENCE_SECS: f64 = 3.0;
-    let silence_chunk = vec![0.0f32; CHUNK];
-    let trailing_chunks = ((TRAILING_SILENCE_SECS * spec.sample_rate as f64) / CHUNK as f64).ceil() as usize;
-    for _ in 0..trailing_chunks {
-        write
-            .send(pcm_frame(&silence_chunk))
-            .await
-            .map_err(|e| AppError::WebSocket(format!("send trailing silence: {e}")))?;
-        tokio::time::sleep(chunk_duration).await;
+    let silence_chunk = vec![0.0_f32; CHUNK];
+    let trailing_chunk_count =
+        ((TRAILING_SILENCE_SECS * spec.sample_rate as f64) / CHUNK as f64).ceil() as usize;
+    let mut trailing_chunk_index = 0;
+    while trailing_chunk_index < trailing_chunk_count {
+        match write.send(pcm_frame(&silence_chunk)).await {
+            Ok(()) => {
+                trailing_chunk_index += 1;
+                tokio::time::sleep(chunk_duration).await;
+            }
+            Err(error) if is_retryable_connection_error(&error) && !retried => {
+                (write, reader) = reconnect_after_send_error(
+                    cfg,
+                    &handshake_json,
+                    total_ms,
+                    segment_sender.clone(),
+                    (write, reader),
+                    "send trailing silence",
+                    error,
+                )
+                .await?;
+                retried = true;
+            }
+            Err(error) if is_retryable_connection_error(&error) => {
+                return Err(AppError::WebSocket(format!(
+                    "send trailing silence failed after one reconnect: {error}"
+                )));
+            }
+            Err(error) => {
+                return Err(AppError::WebSocket(format!(
+                    "send trailing silence: {error}"
+                )));
+            }
+        }
     }
 
-    // Signal end-of-stream per WhisperLive protocol. This MUST be a binary frame — the server
-    // decodes every incoming frame as raw audio bytes, and a text frame here crashes it with
-    // "a bytes-like object is required, not 'str'" (confirmed against the live deployment).
+    // WhisperLive expects END_OF_AUDIO as a binary frame; a text frame is decoded as PCM and
+    // crashes the server's receive path.
     write
         .send(Message::Binary(b"END_OF_AUDIO".to_vec()))
         .await
-        .map_err(|e| AppError::WebSocket(format!("send eos: {e}")))?;
+        .map_err(|error| AppError::WebSocket(format!("send eos: {error}")))?;
+    send_progress(
+        progress_sender.as_ref(),
+        recording_id,
+        total_ms,
+        total_ms,
+        ProgressPhase::Finalizing,
+    );
     let _ = write.close().await;
 
-    // The server flushes final segments and closes the socket after END_OF_AUDIO; the reader
-    // task then returns. Bound the wait in case the server never sends a close frame.
-    tokio::time::timeout(std::time::Duration::from_secs(30), reader)
-        .await
-        .map_err(|_| AppError::WebSocket("timed out waiting for final transcription segments".to_string()))?
-        .map_err(|e| AppError::WebSocket(format!("reader task panicked: {e}")))
+    // The server flushes final segments and closes after END_OF_AUDIO. Bound the wait in case it
+    // never closes, then merge the growing segment snapshots from both connection attempts. The
+    // latest version of each absolute (start, end) pair wins.
+    match tokio::time::timeout(std::time::Duration::from_secs(30), &mut reader).await {
+        Ok(join_result) => join_result
+            .map_err(|error| AppError::WebSocket(format!("reader task panicked: {error}")))?,
+        Err(_) => {
+            reader.abort();
+            let _ = reader.await;
+            return Err(AppError::WebSocket(
+                "timed out waiting for final transcription segments".to_string(),
+            ));
+        }
+    }
+
+    drop(segment_sender);
+    let mut completed = std::collections::BTreeMap::new();
+    while let Some(segment) = segment_receiver.recv().await {
+        completed.insert((segment.start_ms, segment.end_ms), segment);
+    }
+    let result = completed
+        .into_values()
+        .map(|segment| TranscriptSegment {
+            id: Uuid::new_v4(),
+            recording_id,
+            start_ms: segment.start_ms,
+            end_ms: segment.end_ms,
+            speaker_label: segment.speaker_label,
+            text: segment.text,
+            is_final: true,
+        })
+        .collect();
+
+    send_progress(
+        progress_sender.as_ref(),
+        recording_id,
+        total_ms,
+        total_ms,
+        ProgressPhase::Done,
+    );
+    Ok(result)
 }
