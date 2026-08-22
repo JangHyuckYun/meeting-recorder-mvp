@@ -1,5 +1,7 @@
 //! LLM-backed generation and focused editing of grounded meeting minutes.
 
+mod oauth_provider;
+
 use crate::error::{AppError, AppResult};
 use crate::models::{MinutesDraft, MinutesItem, TranscriptSegment};
 use chrono::Utc;
@@ -211,6 +213,25 @@ async fn request_structured_json(
     user_prompt: &str,
     schema: Value,
 ) -> AppResult<String> {
+    if let Ok(provider) = std::env::var("MINUTES_LLM_PROVIDER") {
+        match provider.as_str() {
+            "litellm" => {}
+            "oauth" => {
+                return oauth_provider::request_structured_json(
+                    system_prompt,
+                    user_prompt,
+                    &schema,
+                )
+                .await;
+            }
+            _ => {
+                return Err(AppError::InvalidState(format!(
+                    "unsupported MINUTES_LLM_PROVIDER `{provider}`; expected `litellm` or `oauth`"
+                )));
+            }
+        }
+    }
+
     let base_url = std::env::var("MINUTES_LLM_BASE_URL")
         .unwrap_or_else(|_| DEFAULT_LITELLM_BASE_URL.to_string());
     let model =

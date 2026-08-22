@@ -178,3 +178,69 @@ fn segment(
         is_final: true,
     }
 }
+
+#[tokio::test]
+#[ignore = "requires a Codex CLI OAuth login and MINUTES_LLM_PROVIDER=oauth"]
+async fn generates_grounded_minutes_through_live_oauth_provider() {
+    assert_eq!(
+        std::env::var("MINUTES_LLM_PROVIDER").as_deref(),
+        Ok("oauth"),
+        "run this ignored test with MINUTES_LLM_PROVIDER=oauth"
+    );
+
+    let recording_id = Uuid::new_v4();
+    let segments = vec![
+        segment(
+            recording_id,
+            0,
+            2_500,
+            "화자 1",
+            "이번 금요일까지 고객 피드백 보고서를 완성하기로 합시다.",
+        ),
+        segment(
+            recording_id,
+            2_500,
+            5_000,
+            "화자 2",
+            "동의합니다. 제가 목요일 오후까지 보고서 초안을 작성하겠습니다.",
+        ),
+        segment(
+            recording_id,
+            5_000,
+            7_000,
+            "화자 1",
+            "좋습니다. 금요일 오전에 함께 검토하겠습니다.",
+        ),
+    ];
+    let valid_ids = segments
+        .iter()
+        .map(|segment| segment.id)
+        .collect::<HashSet<_>>();
+
+    let draft = generate_minutes(recording_id, &segments)
+        .await
+        .expect("live OAuth minutes generation");
+    println!(
+        "live OAuth response:\n{}",
+        serde_json::to_string_pretty(&draft).unwrap()
+    );
+
+    assert_eq!(draft.recording_id, recording_id);
+    assert!(!draft.summary.trim().is_empty());
+    let items = draft
+        .decisions
+        .iter()
+        .chain(draft.action_items.iter())
+        .collect::<Vec<_>>();
+    assert!(
+        !items.is_empty(),
+        "the explicit decision/action should produce a grounded item"
+    );
+    for item in items {
+        assert!(!item.evidence_segment_ids.is_empty());
+        assert!(item
+            .evidence_segment_ids
+            .iter()
+            .all(|segment_id| valid_ids.contains(segment_id)));
+    }
+}
