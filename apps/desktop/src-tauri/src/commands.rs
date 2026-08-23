@@ -229,6 +229,12 @@ pub async fn set_app_settings(state: State<'_, AppState>, settings: AppSettings)
         .await
 }
 
+/// Inspects local OAuth credential stores for the settings UI.
+#[tauri::command]
+pub async fn get_oauth_status(provider: String) -> AppResult<crate::minutes::oauth_status::OAuthStatus> {
+    crate::minutes::oauth_status::inspect(&provider)
+}
+
 #[tauri::command]
 pub async fn edit_minutes_item(
     state: State<'_, AppState>,

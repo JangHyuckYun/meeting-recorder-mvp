@@ -2,6 +2,7 @@
 
 mod claude_provider;
 mod oauth_provider;
+pub(crate) mod oauth_status;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{LlmProvider, MinutesDraft, MinutesItem, TranscriptSegment};
