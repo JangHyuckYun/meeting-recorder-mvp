@@ -54,33 +54,6 @@ export function HistoryScreen() {
     void loadRecordings();
   }, [loadRecordings]);
 
-  useEffect(() => {
-    if (!isTranscribing || !detail) {
-      setTranscriptionProgress(null);
-      return;
-    }
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    void (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      if (cancelled) return;
-      const handler = await listen<TranscriptionProgressEvent>("transcription-progress", (event) => {
-        if (event.payload.recording_id !== detail.recording.id) return;
-        setTranscriptionProgress(event.payload);
-      });
-      if (cancelled) {
-        handler();
-        return;
-      }
-      unlisten = handler;
-    })();
-    return () => {
-      cancelled = true;
-      if (unlisten) unlisten();
-      setTranscriptionProgress(null);
-    };
-  }, [isTranscribing, detail]);
-
   const openRecording = async (id: string) => {
     setIsDetailLoading(true);
     setError(null);
@@ -104,7 +77,16 @@ export function HistoryScreen() {
 
   const transcribeRecording = async () => {
     if (!detail) return;
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = await listen<TranscriptionProgressEvent>(
+      "transcription-progress",
+      (event) => {
+        if (event.payload.recording_id !== detail.recording.id) return;
+        setTranscriptionProgress(event.payload);
+      },
+    );
     setIsTranscribing(true);
+    setTranscriptionProgress(null);
     setError(null);
     try {
       const segments = await invoke<TranscriptSegment[]>("transcribe_recording", {
@@ -119,6 +101,7 @@ export function HistoryScreen() {
       setError(errorMessage(invokeError));
     } finally {
       setIsTranscribing(false);
+      unlisten();
     }
   };
 
