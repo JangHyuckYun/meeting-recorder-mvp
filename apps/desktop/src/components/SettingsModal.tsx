@@ -157,7 +157,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setLoginOutput({ codex_oauth: [], claude_oauth: [] });
+      setLoginUrls({ codex_oauth: null, claude_oauth: null });
+      setLoginRunning({ codex_oauth: false, claude_oauth: false });
+      return;
+    }
     let unlistenOutput: (() => void) | undefined;
     let unlistenUrl: (() => void) | undefined;
     let unlistenDone: (() => void) | undefined;
