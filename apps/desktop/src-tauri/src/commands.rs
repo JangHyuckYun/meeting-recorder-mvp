@@ -4,7 +4,7 @@
 use crate::audio::CaptureSession;
 use crate::error::{AppError, AppResult};
 use crate::minutes;
-use crate::models::{MinutesDraft, MinutesItem, Recording, RecordingStatus, TranscriptSegment};
+use crate::models::{AppSettings, LlmProvider, MinutesDraft, MinutesItem, Recording, RecordingStatus, TranscriptSegment};
 use crate::storage::Storage;
 use crate::stt::{self, SttConfig};
 use std::path::PathBuf;
@@ -197,6 +197,28 @@ pub async fn get_minutes(
     let recording_id = Uuid::parse_str(&recording_id)
         .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
     state.storage.get_minutes(recording_id).await
+}
+
+/// Returns the user-managed app settings, applying defaults for keys never saved. Backs the
+/// settings UI's initial state.
+#[tauri::command]
+pub async fn get_app_settings(state: State<'_, AppState>) -> AppResult<AppSettings> {
+    let stored = state.storage.get_setting("llm_provider").await?;
+    let llm_provider = stored
+        .as_deref()
+        .and_then(LlmProvider::from_db_str)
+        .unwrap_or_default();
+    Ok(AppSettings { llm_provider })
+}
+
+/// Persists settings changed from the settings UI. Applies to the NEXT minutes generation or
+/// edit; an in-flight LLM call finishes on its original provider.
+#[tauri::command]
+pub async fn set_app_settings(state: State<'_, AppState>, settings: AppSettings) -> AppResult<()> {
+    state
+        .storage
+        .set_setting("llm_provider", settings.llm_provider.as_str())
+        .await
 }
 
 #[tauri::command]
