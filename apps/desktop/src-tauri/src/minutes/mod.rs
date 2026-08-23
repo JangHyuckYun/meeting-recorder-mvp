@@ -5,7 +5,7 @@ mod oauth_provider;
 pub(crate) mod oauth_status;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{LlmProvider, MinutesDraft, MinutesItem, TranscriptSegment};
+use crate::models::{LlmProvider, MinutesDraft, MinutesItem, ProviderType, TranscriptSegment};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -273,6 +273,237 @@ async fn request_structured_json(
         .map(|choice| choice.message.content)
         .filter(|content| !content.trim().is_empty())
         .ok_or_else(|| AppError::InvalidState("LLM returned no response content".to_string()))
+}
+
+/// Routes a structured generation request by provider type, base_url, api_key, and model name.
+/// This is the new dispatch path used by the model_assignments table. For built-in OAuth
+/// providers (codex_oauth, claude_oauth), the caller should use the original
+/// `request_structured_json` with the matching `LlmProvider` variant instead.
+pub async fn request_structured_json_by_type(
+    provider_type: ProviderType,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    schema: &Value,
+) -> AppResult<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()?;
+
+    match provider_type {
+        ProviderType::Openai | ProviderType::OpenaiCompatible => {
+            let endpoint = if base_url.trim().is_empty() {
+                "https://api.openai.com/v1/chat/completions".to_string()
+            } else {
+                format!("{}/chat/completions", base_url.trim_end_matches('/').trim_end_matches("/v1"))
+            };
+            let mut request = client.post(&endpoint).json(&json!({
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.1,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "minutes_response",
+                        "strict": true,
+                        "schema": schema
+                    }
+                }
+            }));
+            if !api_key.trim().is_empty() {
+                request = request.bearer_auth(api_key);
+            }
+            let completion: ChatCompletion = request.send().await?.error_for_status()?.json().await?;
+            completion
+                .choices
+                .into_iter()
+                .next()
+                .map(|choice| choice.message.content)
+                .filter(|content| !content.trim().is_empty())
+                .ok_or_else(|| AppError::InvalidState("LLM returned no response content".to_string()))
+        }
+        ProviderType::Anthropic => {
+            let endpoint = if base_url.trim().is_empty() {
+                "https://api.anthropic.com/v1/messages".to_string()
+            } else {
+                format!("{}/v1/messages", base_url.trim_end_matches('/'))
+            };
+            let mut request = client.post(&endpoint)
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .json(&json!({
+                    "model": model,
+                    "system": system_prompt,
+                    "messages": [
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "max_tokens": 4096,
+                    "temperature": 0.1,
+                    "extra": {
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "minutes_response",
+                                "schema": schema
+                            }
+                        }
+                    }
+                }));
+            if !api_key.trim().is_empty() {
+                request = request.header("x-api-key", api_key);
+            }
+            let raw = request.send().await?.error_for_status()?.text().await?;
+            // Anthropic returns a slightly different shape; we expect content[0].text
+            let response: Value = serde_json::from_str(&raw)
+                .map_err(|e| AppError::InvalidState(format!("invalid anthropic response: {e}")))?;
+            let content = response["content"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|block| block["text"].as_str())
+                .ok_or_else(|| AppError::InvalidState("Anthropic response missing content[0].text".to_string()))?;
+            Ok(content.to_string())
+        }
+    }
+}
+
+/// Resolved provider configuration used by the model_assignments dispatch path.
+#[derive(Debug, Clone)]
+pub struct ResolvedProvider {
+    pub provider_type: ProviderType,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+/// Generates minutes using a resolved provider from the model_assignments table
+/// instead of the legacy LlmProvider enum.
+pub async fn generate_minutes_with_resolved(
+    resolved: ResolvedProvider,
+    recording_id: Uuid,
+    segments: &[TranscriptSegment],
+) -> AppResult<MinutesDraft> {
+    let final_segments: Vec<&TranscriptSegment> = segments
+        .iter()
+        .filter(|segment| segment.is_final && !segment.text.trim().is_empty())
+        .collect();
+    if final_segments.is_empty() {
+        return Err(AppError::InvalidState(
+            "cannot generate minutes without final transcript segments".to_string(),
+        ));
+    }
+
+    let transcript = final_segments
+        .iter()
+        .map(|segment| {
+            json!({
+                "id": segment.id,
+                "start_ms": segment.start_ms,
+                "end_ms": segment.end_ms,
+                "speaker_label": segment.speaker_label,
+                "text": segment.text,
+            })
+        })
+        .collect::<Vec<_>>();
+    let transcript_json = serde_json::to_string(&transcript).map_err(|error| {
+        AppError::InvalidState(format!("failed to serialize transcript for LLM: {error}"))
+    })?;
+
+    let system_prompt = concat!(
+        "당신은 한국어 회의록 작성자입니다. 제공된 전사에 명시된 사실만 사용해 간결한 한국어 요약, 결정, 할 일을 작성하세요. ",
+        "명시적으로 합의된 내용만 decisions에 넣고, 실제로 요청되거나 약속된 업무만 action_items에 넣으세요. ",
+        "모든 decision/action_item은 최소 1개의 evidence_segment_ids를 가져야 한다. ",
+        "evidence_segment_ids에는 해당 항목을 직접 뒷받침하는 입력 세그먼트의 id만 원문 그대로 넣으세요. ",
+        "근거가 없는 항목은 만들지 마세요. JSON 스키마 이외의 텍스트를 출력하지 마세요."
+    );
+    let user_prompt = format!(
+        "다음 전사 세그먼트로 한국어 회의록을 작성하세요. 각 결정과 할 일에 직접 관련된 세그먼트 id를 인용하세요.\n\n{transcript_json}"
+    );
+
+    let content = request_structured_json_by_type(
+        resolved.provider_type,
+        &resolved.base_url,
+        &resolved.api_key,
+        &resolved.model,
+        system_prompt,
+        &user_prompt,
+        &minutes_schema(),
+    )
+    .await?;
+    let valid_segment_ids = final_segments
+        .iter()
+        .map(|segment| segment.id)
+        .collect::<Vec<_>>();
+    parse_minutes_response(recording_id, &content, &valid_segment_ids)
+}
+
+/// Edits a single minutes item using a resolved provider from the model_assignments table.
+pub async fn edit_minutes_item_text_with_resolved(
+    resolved: ResolvedProvider,
+    item: &MinutesItem,
+    instruction: &str,
+    evidence_segments: &[TranscriptSegment],
+) -> AppResult<String> {
+    let instruction = instruction.trim();
+    if instruction.is_empty() {
+        return Err(AppError::InvalidState(
+            "minutes edit instruction cannot be empty".to_string(),
+        ));
+    }
+    if evidence_segments.is_empty() {
+        return Err(AppError::InvalidState(format!(
+            "minutes item {} has no available evidence segments",
+            item.id
+        )));
+    }
+
+    let evidence = evidence_segments
+        .iter()
+        .map(|segment| {
+            json!({
+                "id": segment.id,
+                "speaker_label": segment.speaker_label,
+                "text": segment.text,
+            })
+        })
+        .collect::<Vec<_>>();
+    let user_prompt = serde_json::to_string(&json!({
+        "current_text": item.text,
+        "instruction": instruction,
+        "evidence": evidence,
+    }))
+    .map_err(|error| {
+        AppError::InvalidState(format!("failed to serialize minutes edit request: {error}"))
+    })?;
+
+    let system_prompt = concat!(
+        "당신은 한국어 회의록의 항목 하나만 수정합니다. 사용자 지시를 따르되 evidence에 없는 사실을 추가하지 마세요. ",
+        "다른 항목, id, evidence_segment_ids는 수정할 수 없습니다. 수정된 한국어 text 하나만 JSON 스키마에 맞춰 반환하세요."
+    );
+    let content = request_structured_json_by_type(
+        resolved.provider_type,
+        &resolved.base_url,
+        &resolved.api_key,
+        &resolved.model,
+        system_prompt,
+        &user_prompt,
+        &edit_schema(),
+    )
+    .await?;
+    let edited: EditedText = serde_json::from_str(&content).map_err(|error| {
+        AppError::InvalidState(format!("LLM returned invalid minutes edit JSON: {error}"))
+    })?;
+    let text = edited.text.trim().to_string();
+    if text.is_empty() {
+        return Err(AppError::InvalidState(
+            "LLM returned empty text for minutes edit".to_string(),
+        ));
+    }
+    Ok(text)
 }
 
 fn minutes_schema() -> Value {

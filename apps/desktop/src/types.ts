@@ -38,6 +38,45 @@ export interface MinutesItem {
   evidence_segment_ids: string[];
 }
 
+/// Maps a functional purpose to a registered provider + model name. Frontend uses this
+/// to let the user pick which model handles minutes generation vs editing.
+export interface ModelAssignment {
+  purpose: "minutes_generation" | "minutes_edit";
+  provider_id: string;
+  model_name: string;
+}
+
+export interface ModelAssignmentInput {
+  purpose: string;
+  provider_id: string;
+  model_name: string;
+}
+
+/// A registered LLM provider as returned by list_providers.
+export interface Provider {
+  id: string;
+  name: string;
+  provider_type: "openai" | "anthropic" | "openai_compatible";
+  base_url: string;
+  api_key_masked: string;
+  models: string[];
+  is_active: boolean;
+  is_builtin: boolean;
+  created_at: string;
+}
+
+/// Input payload for adding or updating a provider.
+export interface ProviderInput {
+  id?: string;
+  name: string;
+  provider_type: string;
+  base_url: string;
+  api_key: string;
+  models_json: string;
+}
+
+/// Legacy types kept for backward compatibility with existing components.
+/// New settings UI uses Provider and ModelAssignment instead.
 export type LlmProvider = "litellm" | "codex_oauth" | "claude_oauth";
 
 export interface AppSettings {

@@ -179,10 +179,29 @@ pub async fn generate_minutes(
     state: State<'_, AppState>,
     recording_id: String,
 ) -> AppResult<MinutesDraft> {
+    use crate::minutes::ResolvedProvider;
+
     let recording_id = Uuid::parse_str(&recording_id)
         .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
-    let llm_provider = stored_llm_provider(&state.storage).await?;
     let segments = state.storage.list_segments(recording_id).await?;
+
+    // Try model_assignments table first; fall back to stored_llm_provider for backward compat.
+    if let Some((provider_id, model_name)) = state.storage.get_assigned_provider_model("minutes_generation").await? {
+        if let Some(provider) = state.storage.get_provider(provider_id).await? {
+            let resolved = ResolvedProvider {
+                provider_type: provider.provider_type,
+                base_url: provider.base_url.clone(),
+                api_key: provider.api_key_masked.clone(),
+                model: model_name,
+            };
+            let draft = minutes::generate_minutes_with_resolved(resolved, recording_id, &segments).await?;
+            state.storage.save_minutes(&draft).await?;
+            return Ok(draft);
+        }
+    }
+
+    // Fallback: stored llm_provider setting
+    let llm_provider = stored_llm_provider(&state.storage).await?;
     let draft = minutes::generate_minutes(llm_provider, recording_id, &segments).await?;
     state.storage.save_minutes(&draft).await?;
     Ok(draft)
@@ -395,14 +414,26 @@ pub async fn edit_minutes_item(
         .into_iter()
         .filter(|segment| original.evidence_segment_ids.contains(&segment.id))
         .collect::<Vec<_>>();
-    let llm_provider = stored_llm_provider(&state.storage).await?;
-    let replacement_text = minutes::edit_minutes_item_text(
-        llm_provider,
-        &original,
-        &instruction,
-        &evidence_segments,
-    )
-    .await?;
+
+    // Try model_assignments table first; fall back to stored_llm_provider.
+    let replacement_text = if let Some((provider_id, model_name)) = state.storage.get_assigned_provider_model("minutes_edit").await? {
+        if let Some(provider) = state.storage.get_provider(provider_id).await? {
+            use crate::minutes::ResolvedProvider;
+            let resolved = ResolvedProvider {
+                provider_type: provider.provider_type,
+                base_url: provider.base_url.clone(),
+                api_key: provider.api_key_masked.clone(),
+                model: model_name,
+            };
+            minutes::edit_minutes_item_text_with_resolved(resolved, &original, &instruction, &evidence_segments).await?
+        } else {
+            let llm_provider = stored_llm_provider(&state.storage).await?;
+            minutes::edit_minutes_item_text(llm_provider, &original, &instruction, &evidence_segments).await?
+        }
+    } else {
+        let llm_provider = stored_llm_provider(&state.storage).await?;
+        minutes::edit_minutes_item_text(llm_provider, &original, &instruction, &evidence_segments).await?
+    };
 
     let edited = draft
         .decisions
@@ -415,4 +446,64 @@ pub async fn edit_minutes_item(
     draft.updated_at = chrono::Utc::now();
     state.storage.save_minutes(&draft).await?;
     Ok(edited)
+}
+
+// ------------------------------------------------------------------
+// Provider registry commands
+// ------------------------------------------------------------------
+
+/// Lists all registered providers, both built-in and user-added, with masked API keys.
+#[tauri::command]
+pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<crate::models::Provider>> {
+    state.storage.list_providers().await
+}
+
+/// Adds a new user provider. Returns the generated provider id.
+#[tauri::command]
+pub async fn add_provider(
+    state: State<'_, AppState>,
+    input: crate::models::ProviderInput,
+) -> AppResult<String> {
+    let id = state.storage.add_provider(&input).await?;
+    Ok(id.to_string())
+}
+
+/// Updates an existing (non-builtin) provider.
+#[tauri::command]
+pub async fn update_provider(
+    state: State<'_, AppState>,
+    input: crate::models::ProviderInput,
+) -> AppResult<()> {
+    state.storage.update_provider(&input).await
+}
+
+/// Deletes a non-builtin provider and its cascade model assignments.
+#[tauri::command]
+pub async fn delete_provider(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    let id = Uuid::parse_str(&id)
+        .map_err(|e| AppError::InvalidState(format!("bad provider id: {e}")))?;
+    state.storage.delete_provider(id).await
+}
+
+/// Lists all model assignments (purpose → provider_id + model_name).
+#[tauri::command]
+pub async fn get_model_assignments(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::models::ModelAssignment>> {
+    state.storage.list_model_assignments().await
+}
+
+/// Sets or updates a model assignment for one purpose.
+#[tauri::command]
+pub async fn set_model_assignment(
+    state: State<'_, AppState>,
+    input: crate::models::ModelAssignmentInput,
+) -> AppResult<()> {
+    state
+        .storage
+        .set_model_assignment(&input.purpose, &input.provider_id, &input.model_name)
+        .await
 }

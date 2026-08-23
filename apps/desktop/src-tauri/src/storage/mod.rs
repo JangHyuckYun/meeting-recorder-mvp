@@ -189,6 +189,126 @@ impl Storage {
         .await?;
         Ok(())
     }
+
+    // ------------------------------------------------------------------
+    // Provider registry
+    // ------------------------------------------------------------------
+
+    pub async fn list_providers(&self) -> AppResult<Vec<crate::models::Provider>> {
+        let rows = sqlx::query(
+            "SELECT id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at FROM providers ORDER BY is_builtin DESC, created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut providers: Vec<crate::models::Provider> = rows.iter().map(row_to_provider).collect();
+        // Mask stored API keys before returning to frontend
+        for provider in &mut providers {
+            if !provider.api_key_masked.is_empty() {
+                provider.api_key_masked = mask_api_key(&provider.api_key_masked);
+            }
+        }
+        Ok(providers)
+    }
+
+    pub async fn add_provider(&self, input: &crate::models::ProviderInput) -> AppResult<Uuid> {
+        let id = Uuid::new_v4();
+        let provider_type = crate::models::ProviderType::from_db_str(&input.provider_type)
+            .ok_or_else(|| AppError::InvalidState(format!("unknown provider type: {}", input.provider_type)))?;
+        sqlx::query(
+            "INSERT INTO providers (id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 0, ?7)",
+        )
+        .bind(id.to_string())
+        .bind(&input.name)
+        .bind(provider_type.as_str())
+        .bind(&input.base_url)
+        .bind(&input.api_key)
+        .bind(&input.models_json)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn update_provider(&self, input: &crate::models::ProviderInput) -> AppResult<()> {
+        let id = input.id.as_deref()
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .ok_or_else(|| AppError::InvalidState("provider id required for update".to_string()))?;
+        let provider_type = crate::models::ProviderType::from_db_str(&input.provider_type)
+            .ok_or_else(|| AppError::InvalidState(format!("unknown provider type: {}", input.provider_type)))?;
+        let api_key = if input.api_key.is_empty() {
+            // keep existing key if no new key provided
+            let row = sqlx::query("SELECT api_key_masked FROM providers WHERE id = ?1")
+                .bind(id.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+            row.map(|r| r.get::<String, _>("api_key_masked")).unwrap_or_default()
+        } else {
+            input.api_key.clone()
+        };
+        sqlx::query(
+            "UPDATE providers SET name = ?2, provider_type = ?3, base_url = ?4, api_key_masked = ?5, models_json = ?6 WHERE id = ?1 AND is_builtin = 0",
+        )
+        .bind(id.to_string())
+        .bind(&input.name)
+        .bind(provider_type.as_str())
+        .bind(&input.base_url)
+        .bind(&api_key)
+        .bind(&input.models_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_provider(&self, id: Uuid) -> AppResult<()> {
+        // cascade-delete associated model_assignments first
+        sqlx::query("DELETE FROM model_assignments WHERE provider_id = ?1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM providers WHERE id = ?1 AND is_builtin = 0")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_assigned_provider_model(&self, purpose: &str) -> AppResult<Option<(Uuid, String)>> {
+        let row = sqlx::query("SELECT provider_id, model_name FROM model_assignments WHERE purpose = ?1")
+            .bind(purpose)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| {
+            let pid = Uuid::parse_str(r.get::<String, _>("provider_id").as_str()).unwrap_or_default();
+            (pid, r.get::<String, _>("model_name"))
+        }))
+    }
+
+    pub async fn get_provider(&self, id: Uuid) -> AppResult<Option<crate::models::Provider>> {
+        let row = sqlx::query("SELECT id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at FROM providers WHERE id = ?1")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(row_to_provider))
+    }
+
+    pub async fn set_model_assignment(&self, purpose: &str, provider_id: &str, model_name: &str) -> AppResult<()> {
+        sqlx::query(
+            "INSERT INTO model_assignments (purpose, provider_id, model_name) VALUES (?1, ?2, ?3) ON CONFLICT(purpose) DO UPDATE SET provider_id = excluded.provider_id, model_name = excluded.model_name",
+        )
+        .bind(purpose)
+        .bind(provider_id)
+        .bind(model_name)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_model_assignments(&self) -> AppResult<Vec<crate::models::ModelAssignment>> {
+        let rows = sqlx::query("SELECT purpose, provider_id, model_name FROM model_assignments")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.iter().map(row_to_assignment).collect())
+    }
 }
 
 fn row_to_recording(row: &sqlx::sqlite::SqliteRow) -> Recording {
@@ -214,4 +334,40 @@ fn row_to_segment(row: &sqlx::sqlite::SqliteRow) -> TranscriptSegment {
         text: row.get("text"),
         is_final: row.get::<i64, _>("is_final") != 0,
     }
+}
+
+fn row_to_provider(row: &sqlx::sqlite::SqliteRow) -> crate::models::Provider {
+    use crate::models::*;
+    Provider {
+        id: Uuid::parse_str(row.get::<String, _>("id").as_str()).unwrap_or_default(),
+        name: row.get("name"),
+        provider_type: ProviderType::from_db_str(row.get::<String, _>("provider_type").as_str()).unwrap_or(ProviderType::OpenaiCompatible),
+        base_url: row.get("base_url"),
+        api_key_masked: row.get("api_key_masked"),
+        models_json: row.get("models_json"),
+        is_active: row.get::<i64, _>("is_active") != 0,
+        is_builtin: row.get::<i64, _>("is_builtin") != 0,
+        created_at: chrono::DateTime::parse_from_rfc3339(row.get::<String, _>("created_at").as_str())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(|_| chrono::Utc::now()),
+    }
+}
+
+fn row_to_assignment(row: &sqlx::sqlite::SqliteRow) -> crate::models::ModelAssignment {
+    use crate::models::*;
+    ModelAssignment {
+        purpose: ModelPurpose::from_db_str(row.get::<String, _>("purpose").as_str()).unwrap_or_default(),
+        provider_id: Uuid::parse_str(row.get::<String, _>("provider_id").as_str()).unwrap_or_default(),
+        model_name: row.get("model_name"),
+    }
+}
+
+/// Masks an API key for storage, showing only the first 8 characters. The actual key is
+/// never stored; only the masked form is persisted so a DB leak does not expose secrets.
+fn mask_api_key(key: &str) -> String {
+    if key.len() <= 8 || !key.contains(|c: char| c.is_alphanumeric()) {
+        return key.to_string();
+    }
+    let visible: String = key.chars().take(8).collect();
+    format!("{visible}…{rest}", rest = key.len().saturating_sub(8))
 }

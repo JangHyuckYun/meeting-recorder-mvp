@@ -117,6 +117,130 @@ impl LlmProvider {
     }
 }
 
+/// A registered LLM provider endpoint. Built-in providers (codex_oauth, claude_oauth) are
+/// seeded by migration and cannot be deleted; user-added providers (OpenAI key, vLLM, etc.)
+/// can be freely managed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Provider {
+    pub id: Uuid,
+    pub name: String,
+    pub provider_type: ProviderType,
+    /// API base URL. For built-in OAuth providers this is empty; for registered providers it
+    /// is the endpoint (e.g. https://api.openai.com/v1).
+    pub base_url: String,
+    /// Stored API key (masked when sent to the frontend). Empty for OAuth providers.
+    pub api_key_masked: String,
+    /// Available models as a JSON array string (e.g. `["gpt-4o","gpt-4.1-mini"]`).
+    pub models_json: String,
+    pub is_active: bool,
+    pub is_builtin: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderType {
+    /// api.openai.com / compatible with OpenAI chat completions schema
+    Openai,
+    /// api.anthropic.com / Anthropic Messages API
+    Anthropic,
+    /// Any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM gateway, etc.)
+    OpenaiCompatible,
+}
+
+impl ProviderType {
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "openai" => Some(ProviderType::Openai),
+            "anthropic" => Some(ProviderType::Anthropic),
+            "openai_compatible" => Some(ProviderType::OpenaiCompatible),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProviderType::Openai => "openai",
+            ProviderType::Anthropic => "anthropic",
+            ProviderType::OpenaiCompatible => "openai_compatible",
+        }
+    }
+}
+
+/// Maps a functional purpose to a registered provider + model name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAssignment {
+    pub purpose: ModelPurpose,
+    pub provider_id: Uuid,
+    /// The actual model name (e.g. "gpt-4o", "claude-sonnet-4-20250514").
+    pub model_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPurpose {
+    #[default]
+    MinutesGeneration,
+    MinutesEdit,
+}
+
+impl ModelPurpose {
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "minutes_generation" => Some(ModelPurpose::MinutesGeneration),
+            "minutes_edit" => Some(ModelPurpose::MinutesEdit),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ModelPurpose::MinutesGeneration => "minutes_generation",
+            ModelPurpose::MinutesEdit => "minutes_edit",
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ModelPurpose::MinutesGeneration => "회의록 생성",
+            ModelPurpose::MinutesEdit => "회의록 항목 수정",
+        }
+    }
+}
+
+/// Payload for adding or updating a provider from the frontend. The `api_key` field is
+/// always unmasked in requests; responses carry it masked.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub provider_type: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub models_json: String,
+}
+
+/// Payload for setting a model assignment from the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAssignmentInput {
+    pub purpose: String,
+    pub provider_id: String,
+    pub model_name: String,
+}
+
+/// Lightweight DTO for the frontend provider list (no api_key, no models_json full).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub provider_type: String,
+    pub base_url: String,
+    pub api_key_masked: String,
+    pub models: Vec<String>,
+    pub is_active: bool,
+    pub is_builtin: bool,
+}
+
 /// User-manageable application settings, served to and persisted from the settings UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -130,3 +254,4 @@ impl Default for AppSettings {
         }
     }
 }
+
