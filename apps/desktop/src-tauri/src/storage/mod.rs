@@ -166,6 +166,29 @@ impl Storage {
             updated_at,
         }))
     }
+
+    /// Reads a single app-level setting. Returns `None` when unset so callers apply their
+    /// own defaults instead of the storage layer hard-coding policy.
+    pub async fn get_setting(&self, key: &str) -> AppResult<Option<String>> {
+        let row = sqlx::query("SELECT value FROM app_settings WHERE key = ?1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<String, _>("value")))
+    }
+
+    /// Writes a single app-level setting. Upsert semantics: rewriting an existing key
+    /// replaces its value instead of violating the primary key.
+    pub async fn set_setting(&self, key: &str, value: &str) -> AppResult<()> {
+        sqlx::query(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 fn row_to_recording(row: &sqlx::sqlite::SqliteRow) -> Recording {

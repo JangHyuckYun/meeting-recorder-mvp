@@ -37,3 +37,18 @@ export interface MinutesItem {
   text: string;
   evidence_segment_ids: string[];
 }
+
+export type LlmProvider = "litellm" | "codex_oauth" | "claude_oauth";
+
+export interface AppSettings {
+  llm_provider: LlmProvider;
+}
+
+export interface OAuthStatus {
+  provider: string;
+  logged_in: boolean;
+  account_id: string | null;
+  expires_at: string | null; // RFC3339 UTC, null when unknown
+  access_expired: boolean;
+  credentials_path: string;
+}
