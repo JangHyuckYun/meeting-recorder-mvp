@@ -1,5 +1,5 @@
 use desktop_lib::minutes::{edit_minutes_item_text, generate_minutes, parse_minutes_response};
-use desktop_lib::models::{MinutesItem, TranscriptSegment};
+use desktop_lib::models::{LlmProvider, MinutesItem, TranscriptSegment};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -87,7 +87,7 @@ async fn generates_grounded_minutes_through_live_litellm() {
         .map(|segment| segment.id)
         .collect::<HashSet<_>>();
 
-    let draft = generate_minutes(recording_id, &segments)
+    let draft = generate_minutes(LlmProvider::Litellm, recording_id, &segments)
         .await
         .expect("live LiteLLM minutes generation");
     println!(
@@ -135,6 +135,7 @@ async fn edits_single_minutes_item_via_live_litellm_preserving_identity() {
     };
 
     let edited_text = edit_minutes_item_text(
+        LlmProvider::Litellm,
         &original,
         "고객 보고용으로 더 간결하고 격식 있게 다듬어줘",
         std::slice::from_ref(&evidence_segment),
@@ -180,14 +181,8 @@ fn segment(
 }
 
 #[tokio::test]
-#[ignore = "requires a Codex CLI OAuth login and MINUTES_LLM_PROVIDER=oauth"]
+#[ignore = "requires a Codex CLI OAuth login (~/.codex/auth.json)"]
 async fn generates_grounded_minutes_through_live_oauth_provider() {
-    assert_eq!(
-        std::env::var("MINUTES_LLM_PROVIDER").as_deref(),
-        Ok("oauth"),
-        "run this ignored test with MINUTES_LLM_PROVIDER=oauth"
-    );
-
     let recording_id = Uuid::new_v4();
     let segments = vec![
         segment(
@@ -217,7 +212,7 @@ async fn generates_grounded_minutes_through_live_oauth_provider() {
         .map(|segment| segment.id)
         .collect::<HashSet<_>>();
 
-    let draft = generate_minutes(recording_id, &segments)
+    let draft = generate_minutes(LlmProvider::CodexOauth, recording_id, &segments)
         .await
         .expect("live OAuth minutes generation");
     println!(

@@ -180,8 +180,9 @@ pub async fn generate_minutes(
 ) -> AppResult<MinutesDraft> {
     let recording_id = Uuid::parse_str(&recording_id)
         .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
+    let llm_provider = stored_llm_provider(&state.storage).await?;
     let segments = state.storage.list_segments(recording_id).await?;
-    let draft = minutes::generate_minutes(recording_id, &segments).await?;
+    let draft = minutes::generate_minutes(llm_provider, recording_id, &segments).await?;
     state.storage.save_minutes(&draft).await?;
     Ok(draft)
 }
@@ -203,12 +204,19 @@ pub async fn get_minutes(
 /// settings UI's initial state.
 #[tauri::command]
 pub async fn get_app_settings(state: State<'_, AppState>) -> AppResult<AppSettings> {
-    let stored = state.storage.get_setting("llm_provider").await?;
-    let llm_provider = stored
+    Ok(AppSettings {
+        llm_provider: stored_llm_provider(&state.storage).await?,
+    })
+}
+
+/// Reads the persisted LLM provider, falling back to the LiteLLM default for keys never saved
+/// or holding a value written by an older build.
+async fn stored_llm_provider(storage: &Storage) -> AppResult<LlmProvider> {
+    let stored = storage.get_setting("llm_provider").await?;
+    Ok(stored
         .as_deref()
         .and_then(LlmProvider::from_db_str)
-        .unwrap_or_default();
-    Ok(AppSettings { llm_provider })
+        .unwrap_or_default())
 }
 
 /// Persists settings changed from the settings UI. Applies to the NEXT minutes generation or
@@ -252,8 +260,14 @@ pub async fn edit_minutes_item(
         .into_iter()
         .filter(|segment| original.evidence_segment_ids.contains(&segment.id))
         .collect::<Vec<_>>();
-    let replacement_text =
-        minutes::edit_minutes_item_text(&original, &instruction, &evidence_segments).await?;
+    let llm_provider = stored_llm_provider(&state.storage).await?;
+    let replacement_text = minutes::edit_minutes_item_text(
+        llm_provider,
+        &original,
+        &instruction,
+        &evidence_segments,
+    )
+    .await?;
 
     let edited = draft
         .decisions

@@ -1,9 +1,10 @@
 //! LLM-backed generation and focused editing of grounded meeting minutes.
 
+mod claude_provider;
 mod oauth_provider;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{MinutesDraft, MinutesItem, TranscriptSegment};
+use crate::models::{LlmProvider, MinutesDraft, MinutesItem, TranscriptSegment};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -51,6 +52,7 @@ struct ChatMessage {
 /// Generates Korean minutes from final transcript segments. Items whose evidence is missing,
 /// malformed, or not part of the supplied transcript are dropped before the draft is returned.
 pub async fn generate_minutes(
+    provider: LlmProvider,
     recording_id: Uuid,
     segments: &[TranscriptSegment],
 ) -> AppResult<MinutesDraft> {
@@ -91,7 +93,8 @@ pub async fn generate_minutes(
         "다음 전사 세그먼트로 한국어 회의록을 작성하세요. 각 결정과 할 일에 직접 관련된 세그먼트 id를 인용하세요.\n\n{transcript_json}"
     );
 
-    let content = request_structured_json(system_prompt, &user_prompt, minutes_schema()).await?;
+    let content =
+        request_structured_json(provider, system_prompt, &user_prompt, minutes_schema()).await?;
     let valid_segment_ids = final_segments
         .iter()
         .map(|segment| segment.id)
@@ -129,6 +132,7 @@ pub fn parse_minutes_response(
 /// Returns only replacement text for one item. The caller remains responsible for applying that
 /// text to the existing item so its id, evidence references, and neighboring items stay intact.
 pub async fn edit_minutes_item_text(
+    provider: LlmProvider,
     item: &MinutesItem,
     instruction: &str,
     evidence_segments: &[TranscriptSegment],
@@ -169,7 +173,8 @@ pub async fn edit_minutes_item_text(
         "당신은 한국어 회의록의 항목 하나만 수정합니다. 사용자 지시를 따르되 evidence에 없는 사실을 추가하지 마세요. ",
         "다른 항목, id, evidence_segment_ids는 수정할 수 없습니다. 수정된 한국어 text 하나만 JSON 스키마에 맞춰 반환하세요."
     );
-    let content = request_structured_json(system_prompt, &user_prompt, edit_schema()).await?;
+    let content =
+        request_structured_json(provider, system_prompt, &user_prompt, edit_schema()).await?;
     let edited: EditedText = serde_json::from_str(&content).map_err(|error| {
         AppError::InvalidState(format!("LLM returned invalid minutes edit JSON: {error}"))
     })?;
@@ -208,28 +213,25 @@ fn grounded_items(items: Vec<GeneratedItem>, valid_ids: &HashSet<Uuid>) -> Vec<M
         .collect()
 }
 
+/// Routes one structured-generation request to the LLM backend selected in app settings.
+/// The provider is injected explicitly by the command layer — there is deliberately no
+/// environment-variable fallback, so the settings UI is the single source of truth.
 async fn request_structured_json(
+    provider: LlmProvider,
     system_prompt: &str,
     user_prompt: &str,
     schema: Value,
 ) -> AppResult<String> {
-    if let Ok(provider) = std::env::var("MINUTES_LLM_PROVIDER") {
-        match provider.as_str() {
-            "litellm" => {}
-            "oauth" => {
-                return oauth_provider::request_structured_json(
-                    system_prompt,
-                    user_prompt,
-                    &schema,
-                )
+    match provider {
+        LlmProvider::CodexOauth => {
+            return oauth_provider::request_structured_json(system_prompt, user_prompt, &schema)
                 .await;
-            }
-            _ => {
-                return Err(AppError::InvalidState(format!(
-                    "unsupported MINUTES_LLM_PROVIDER `{provider}`; expected `litellm` or `oauth`"
-                )));
-            }
         }
+        LlmProvider::ClaudeOauth => {
+            return claude_provider::request_structured_json(system_prompt, user_prompt, &schema)
+                .await;
+        }
+        LlmProvider::Litellm => {}
     }
 
     let base_url = std::env::var("MINUTES_LLM_BASE_URL")
