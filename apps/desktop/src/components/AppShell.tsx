@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { SettingsModal } from "./SettingsModal";
 
 type AppView = "live" | "history" | "import";
 
@@ -36,6 +37,8 @@ function ImportIcon() {
 }
 
 export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="주요 메뉴">
@@ -74,11 +77,17 @@ export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
             <span>가져오기</span>
           </button>
         </nav>
-        <div className="profile-dot" aria-label="사용자 프로필">
+        <button
+          type="button"
+          className="profile-dot"
+          aria-label="설정 열기"
+          onClick={() => setSettingsOpen(true)}
+        >
           윤
-        </div>
+        </button>
       </aside>
       <main className="workspace">{children}</main>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
