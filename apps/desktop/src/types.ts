@@ -81,6 +81,7 @@ export type LlmProvider = "litellm" | "codex_oauth" | "claude_oauth";
 
 export interface AppSettings {
   llm_provider: LlmProvider;
+  stt_server_url: string | null;
 }
 
 export interface OAuthStatus {

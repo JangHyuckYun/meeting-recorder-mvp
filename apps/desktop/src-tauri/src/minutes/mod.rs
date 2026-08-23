@@ -2,10 +2,11 @@
 
 mod claude_provider;
 mod oauth_provider;
+pub(crate) mod cache;
 pub(crate) mod oauth_status;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{LlmProvider, MinutesDraft, MinutesItem, ProviderType, TranscriptSegment};
+use crate::models::{CaptionEvent, CaptionStatus, LlmProvider, MinutesDraft, MinutesItem, ProviderType, TranscriptSegment};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -541,4 +542,73 @@ fn edit_schema() -> Value {
             "text": {"type": "string", "minLength": 1}
         }
     })
+}
+
+/// Filters caption events to only COMMITTED or REVISED, mapping them to TranscriptSegment
+/// so the existing minutes pipeline can consume them without interface changes.
+pub fn filter_caption_segments_for_minutes(events: &[CaptionEvent]) -> Vec<TranscriptSegment> {
+    events
+        .iter()
+        .filter(|ev| {
+            matches!(ev.status, CaptionStatus::Committed | CaptionStatus::Revised)
+        })
+        .map(|ev| {
+            TranscriptSegment {
+                id: ev.segment_id,
+                recording_id: uuid::Uuid::default(),
+                start_ms: ev.start_ms(),
+                end_ms: ev.end_ms(),
+                speaker_label: ev.speaker_label.clone().unwrap_or_default(),
+                text: ev.text.clone(),
+                is_final: true,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod caption_gate_tests {
+    use super::*;
+    use crate::models::{CaptionEvent, CaptionStatus};
+    use uuid::Uuid;
+
+    fn make_event(status: CaptionStatus) -> CaptionEvent {
+        CaptionEvent {
+            segment_id: Uuid::new_v4(),
+            start_sample: 0,
+            end_sample: 4800,
+            text: "test".to_string(),
+            status,
+            speaker_label: None,
+            overlap: None,
+            supersedes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_committed_segments_are_included() {
+        let events = vec![
+            make_event(CaptionStatus::Committed),
+            make_event(CaptionStatus::Revised),
+        ];
+        let segments = filter_caption_segments_for_minutes(&events);
+        assert_eq!(segments.len(), 2);
+    }
+
+    #[test]
+    fn test_partial_and_stable_are_excluded() {
+        let events = vec![
+            make_event(CaptionStatus::Partial),
+            make_event(CaptionStatus::Stable),
+            make_event(CaptionStatus::Committed),
+        ];
+        let segments = filter_caption_segments_for_minutes(&events);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn test_empty_input_returns_empty() {
+        let segments = filter_caption_segments_for_minutes(&[]);
+        assert!(segments.is_empty());
+    }
 }

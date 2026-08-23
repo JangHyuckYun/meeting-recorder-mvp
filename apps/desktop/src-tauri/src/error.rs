@@ -19,6 +19,8 @@ pub enum AppError {
     NotFound(String),
     #[error("invalid state: {0}")]
     InvalidState(String),
+    #[error("stt error: {0}")]
+    Stt(String),
 }
 
 pub type AppResult<T> = Result<T, AppError>;

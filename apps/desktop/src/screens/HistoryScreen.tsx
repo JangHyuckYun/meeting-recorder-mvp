@@ -32,10 +32,10 @@ export function HistoryScreen() {
   const [minutesDraft, setMinutesDraft] = useState<MinutesDraft | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [transcriptionProgress, setTranscriptionProgress] = useState<TranscriptionProgressEvent | null>(null);
+  const [transcribingRecordings, setTranscribingRecordings] = useState<Set<string>>(new Set());
+  const [transcriptionProgress, setTranscriptionProgress] = useState<Record<string, TranscriptionProgressEvent>>({});
 
   const loadRecordings = useCallback(async () => {
     setIsLoading(true);
@@ -77,20 +77,22 @@ export function HistoryScreen() {
 
   const transcribeRecording = async () => {
     if (!detail) return;
+    const recId = detail.recording.id;
+    setTranscribingRecordings((prev) => new Set(prev).add(recId));
+    setTranscriptionProgress((prev) => ({ ...prev, [recId]: null as unknown as TranscriptionProgressEvent }));
+    setError(null);
+
     const { listen } = await import("@tauri-apps/api/event");
     const unlisten = await listen<TranscriptionProgressEvent>(
       "transcription-progress",
       (event) => {
-        if (event.payload.recording_id !== detail.recording.id) return;
-        setTranscriptionProgress(event.payload);
+        if (event.payload.recording_id !== recId) return;
+        setTranscriptionProgress((prev) => ({ ...prev, [recId]: event.payload }));
       },
     );
-    setIsTranscribing(true);
-    setTranscriptionProgress(null);
-    setError(null);
     try {
       const segments = await invoke<TranscriptSegment[]>("transcribe_recording", {
-        id: detail.recording.id,
+        id: recId,
       });
       const recording = { ...detail.recording, status: "transcribed" as const };
       setDetail({ recording, segments });
@@ -100,9 +102,40 @@ export function HistoryScreen() {
     } catch (invokeError) {
       setError(errorMessage(invokeError));
     } finally {
-      setIsTranscribing(false);
+      setTranscribingRecordings((prev) => {
+        const next = new Set(prev);
+        next.delete(recId);
+        return next;
+      });
       unlisten();
     }
+  };
+
+  const cancelTranscription = async () => {
+    try {
+      await invoke("cancel_transcription");
+      setError(null);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
+  const retryTranscription = async () => {
+    if (!detail) return;
+    // Reset status to recorded so the transcribe button reappears
+    // Also update the backend DB
+    try {
+      await invoke("update_recording_status", { id: detail.recording.id, status: "recorded" });
+    } catch { /* ignore */ }
+    const updated = { ...detail.recording, status: "recorded" as const };
+    setDetail({
+      ...detail,
+      recording: updated,
+    });
+    setRecordings((current) =>
+      current.map((item) => (item.id === updated.id ? updated : item)),
+    );
+    setError(null);
   };
 
   const generateMinutes = async () => {
@@ -138,17 +171,21 @@ export function HistoryScreen() {
   };
 
   if (detail) {
-    const canTranscribe = ["recorded", "failed"].includes(detail.recording.status);
+    const recId = detail.recording.id;
+    const isThisTranscribing = transcribingRecordings.has(recId);
+    const canTranscribe = detail.recording.status === "recorded";
+    const canRetry = detail.recording.status === "failed";
     const canGenerateMinutes = detail.segments.length > 0 && !minutesDraft;
+    const thisProgress = transcriptionProgress[recId];
     const progressPercent =
-      transcriptionProgress && transcriptionProgress.total_ms > 0
-        ? Math.min(100, Math.max(0, (transcriptionProgress.sent_ms / transcriptionProgress.total_ms) * 100))
+      thisProgress && thisProgress.total_ms > 0
+        ? Math.min(100, Math.max(0, (thisProgress.sent_ms / thisProgress.total_ms) * 100))
         : 0;
     const progressText = (() => {
-      if (!transcriptionProgress) return null;
-      if (transcriptionProgress.phase === "finalizing") return "완료 처리 중...";
-      if (transcriptionProgress.phase === "done") return "완료";
-      const remainingMs = transcriptionProgress.total_ms - transcriptionProgress.sent_ms;
+      if (!thisProgress) return null;
+      if (thisProgress.phase === "finalizing") return "완료 처리 중...";
+      if (thisProgress.phase === "done") return "완료";
+      const remainingMs = thisProgress.total_ms - thisProgress.sent_ms;
       const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
       return `약 ${remainingSec}초 남음`;
     })();
@@ -178,25 +215,53 @@ export function HistoryScreen() {
               <h2>전사 내용</h2>
               <span>{detail.segments.length}개 세그먼트</span>
             </div>
-            {canTranscribe && (
+            {canTranscribe && !isThisTranscribing && (
               <button
                 type="button"
                 className="button primary"
-                disabled={isTranscribing}
                 onClick={transcribeRecording}
               >
-                {isTranscribing ? "전사 생성 중..." : "전사 시작"}
+                전사 시작
+              </button>
+            )}
+            {isThisTranscribing && (
+              <button
+                type="button"
+                className="button secondary"
+                style={{ color: "hsl(var(--destructive))", borderColor: "hsl(var(--destructive) / 0.25)" }}
+                onClick={cancelTranscription}
+              >
+                전사 취소
+              </button>
+            )}
+            {canRetry && !isThisTranscribing && (
+              <button
+                type="button"
+                className="button primary"
+                onClick={retryTranscription}
+              >
+                재시도
+              </button>
+            )}
+            {detail.recording.status === "transcribing" && !isThisTranscribing && (
+              <button
+                type="button"
+                className="button secondary"
+                style={{ color: "hsl(var(--warning))", borderColor: "hsl(var(--warning) / 0.25)" }}
+                onClick={retryTranscription}
+              >
+                상태 초기화
               </button>
             )}
           </div>
 
-          {isTranscribing && (
+          {isThisTranscribing && (
             <div className="transcription-progress" aria-live="polite">
               <div className="progress-track">
                 <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
               </div>
               <span className="progress-text">
-                {progressText ?? "전사 준비 중..."} {transcriptionProgress ? `${Math.round(progressPercent)}%` : ""}
+                {progressText ?? "전사 준비 중..."} {thisProgress ? `${Math.round(progressPercent)}%` : ""}
               </span>
             </div>
           )}

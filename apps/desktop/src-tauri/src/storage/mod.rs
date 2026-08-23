@@ -190,17 +190,30 @@ impl Storage {
         Ok(())
     }
 
+    /// Returns all app settings as a single AppSettings struct.
+    pub async fn get_settings(&self) -> AppResult<crate::models::AppSettings> {
+        let llm_provider = self.get_setting("llm_provider").await?
+            .as_deref()
+            .and_then(crate::models::LlmProvider::from_db_str)
+            .unwrap_or_default();
+        let stt_server_url = self.get_setting("stt_server_url").await?;
+        Ok(crate::models::AppSettings {
+            llm_provider,
+            stt_server_url,
+        })
+    }
+
     // ------------------------------------------------------------------
     // Provider registry
     // ------------------------------------------------------------------
 
-    pub async fn list_providers(&self) -> AppResult<Vec<crate::models::Provider>> {
+    pub async fn list_providers(&self) -> AppResult<Vec<crate::models::ProviderSummary>> {
         let rows = sqlx::query(
             "SELECT id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at FROM providers ORDER BY is_builtin DESC, created_at ASC",
         )
         .fetch_all(&self.pool)
         .await?;
-        let mut providers: Vec<crate::models::Provider> = rows.iter().map(row_to_provider).collect();
+        let mut providers: Vec<crate::models::ProviderSummary> = rows.iter().map(row_to_provider).collect();
         // Mask stored API keys before returning to frontend
         for provider in &mut providers {
             if !provider.api_key_masked.is_empty() {
@@ -283,7 +296,7 @@ impl Storage {
         }))
     }
 
-    pub async fn get_provider(&self, id: Uuid) -> AppResult<Option<crate::models::Provider>> {
+    pub async fn get_provider(&self, id: Uuid) -> AppResult<Option<crate::models::ProviderSummary>> {
         let row = sqlx::query("SELECT id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at FROM providers WHERE id = ?1")
             .bind(id.to_string())
             .fetch_optional(&self.pool)
@@ -336,20 +349,19 @@ fn row_to_segment(row: &sqlx::sqlite::SqliteRow) -> TranscriptSegment {
     }
 }
 
-fn row_to_provider(row: &sqlx::sqlite::SqliteRow) -> crate::models::Provider {
+fn row_to_provider(row: &sqlx::sqlite::SqliteRow) -> crate::models::ProviderSummary {
     use crate::models::*;
-    Provider {
+    let models_json: String = row.get("models_json");
+    let models: Vec<String> = serde_json::from_str(&models_json).unwrap_or_default();
+    ProviderSummary {
         id: Uuid::parse_str(row.get::<String, _>("id").as_str()).unwrap_or_default(),
         name: row.get("name"),
-        provider_type: ProviderType::from_db_str(row.get::<String, _>("provider_type").as_str()).unwrap_or(ProviderType::OpenaiCompatible),
+        provider_type: row.get::<String, _>("provider_type"),
         base_url: row.get("base_url"),
         api_key_masked: row.get("api_key_masked"),
-        models_json: row.get("models_json"),
+        models,
         is_active: row.get::<i64, _>("is_active") != 0,
         is_builtin: row.get::<i64, _>("is_builtin") != 0,
-        created_at: chrono::DateTime::parse_from_rfc3339(row.get::<String, _>("created_at").as_str())
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(|_| chrono::Utc::now()),
     }
 }
 

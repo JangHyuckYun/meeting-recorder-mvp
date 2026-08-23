@@ -1,3 +1,4 @@
+pub mod asr;
 pub mod audio;
 mod commands;
 pub mod error;
@@ -7,6 +8,8 @@ pub mod storage;
 pub mod stt;
 
 use commands::AppState;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::Mutex;
 use storage::Storage;
 use tauri::Manager;
@@ -32,6 +35,7 @@ pub fn run() {
                 handle.manage(AppState {
                     storage,
                     capture: Mutex::new(None),
+                    transcription_cancel: Arc::new(AtomicBool::new(false)),
                 });
             });
             Ok(())
@@ -56,6 +60,8 @@ pub fn run() {
             commands::delete_provider,
             commands::get_model_assignments,
             commands::set_model_assignment,
+            commands::cancel_transcription,
+            commands::update_recording_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,6 +8,8 @@ use crate::models::TranscriptSegment;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -248,6 +250,7 @@ pub async fn transcribe_wav_file(
     recording_id: Uuid,
     wav_path: &std::path::Path,
     progress_sender: Option<UnboundedSender<TranscriptionProgress>>,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> AppResult<Vec<TranscriptSegment>> {
     let mut wav_reader = hound::WavReader::open(wav_path)
         .map_err(|error| AppError::Audio(format!("failed to open wav {wav_path:?}: {error}")))?;
@@ -290,16 +293,27 @@ pub async fn transcribe_wav_file(
         .await
         .map_err(AppError::WebSocket)?;
 
-    // WhisperLive runs VAD + ASR on an internal timer against audio received so far, so these
-    // chunks MUST remain paced close to real time. Blasting the file races the processing thread
-    // and produces incomplete or empty transcription results.
-    const CHUNK: usize = 4096;
-    let chunk_duration = std::time::Duration::from_secs_f64(CHUNK as f64 / spec.sample_rate as f64);
+    // WhisperLive runs VAD + ASR on an internal timer against audio received so far. For
+    // file-based transcription we send 2-second chunks with a brief pacing delay (~0.25x
+    // real-time) to give the server processing time without waiting full real-time duration.
+    const CHUNK: usize = 32768; // 2 seconds at 16kHz
+    let pacing_factor = 0.25; // send ~4x faster than real-time
+    let chunk_duration = std::time::Duration::from_secs_f64(
+        CHUNK as f64 / spec.sample_rate as f64 * pacing_factor,
+    );
     let audio_chunk_count = samples_f32.len().div_ceil(CHUNK);
     let mut audio_chunk_index = 0;
     let mut retried = false;
 
     while audio_chunk_index < audio_chunk_count {
+        // Check for cancellation
+        if let Some(ref cancel) = cancel {
+            if cancel.load(Ordering::SeqCst) {
+                let _ = write.close().await;
+                return Err(AppError::WebSocket("transcription cancelled by user".to_string()));
+            }
+        }
+
         let chunk_start = audio_chunk_index * CHUNK;
         let chunk_end = (chunk_start + CHUNK).min(samples_f32.len());
         match write
@@ -351,6 +365,14 @@ pub async fn transcribe_wav_file(
         ((TRAILING_SILENCE_SECS * spec.sample_rate as f64) / CHUNK as f64).ceil() as usize;
     let mut trailing_chunk_index = 0;
     while trailing_chunk_index < trailing_chunk_count {
+        // Check for cancellation
+        if let Some(ref cancel) = cancel {
+            if cancel.load(Ordering::SeqCst) {
+                let _ = write.close().await;
+                return Err(AppError::WebSocket("transcription cancelled by user".to_string()));
+            }
+        }
+
         match write.send(pcm_frame(&silence_chunk)).await {
             Ok(()) => {
                 trailing_chunk_index += 1;

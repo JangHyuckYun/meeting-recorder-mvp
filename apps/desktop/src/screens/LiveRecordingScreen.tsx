@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { CaptionTimeline, SpeakerTracks, WavVisualizer } from "@/components/canvas";
+import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { MinutesView } from "../components/MinutesView";
 import { errorMessage, formatDuration } from "../formatters";
 import type { Recording } from "../types";
@@ -68,21 +70,20 @@ export function LiveRecordingScreen() {
             <p className="eyebrow">LIVE SESSION</p>
             <h1>{recording?.title ?? "새 회의 녹음"}</h1>
           </div>
-          <span className={`status-pill ${isRecording ? "recording" : "idle"}`}>
-            <span className="status-dot" />
+          <Badge variant={isRecording ? "destructive" : "neutral"} dot pulse={isRecording}>
             {isRecording ? "녹음 중" : "정지"}
-          </span>
+          </Badge>
         </header>
 
         <div className="recording-hero">
-          <div className={`waveform ${isRecording ? "active" : ""}`} aria-hidden="true">
-            {[18, 34, 52, 30, 68, 42, 76, 46, 60, 26, 48, 72, 38, 56, 24, 44, 64, 32].map(
-              (height, index) => (
-                <span key={index} style={{ height }} />
-              ),
-            )}
-          </div>
-          <time className="recording-time">{formatDuration(elapsedMs)}</time>
+          <WavVisualizer
+            active={isRecording}
+            className="max-w-md"
+            label={isRecording ? "입력 레벨 (신호 대기 중)" : "입력 레벨 (정지)"}
+          />
+          <time className="recording-time" data-numeric>
+            {formatDuration(elapsedMs)}
+          </time>
           <p>
             {isRecording
               ? "회의 내용을 안전하게 녹음하고 있습니다."
@@ -115,17 +116,31 @@ export function LiveRecordingScreen() {
 
         {error && <div className="error-banner">녹음 요청을 처리하지 못했습니다: {error}</div>}
 
-        <div className="live-transcript-placeholder">
-          <div className="placeholder-icon">“</div>
-          <div>
-            <h2>실시간 전사 스트림</h2>
-            <p>
-              {isRecording
-                ? "음성을 듣고 있습니다. 전사는 녹음 종료 후 히스토리에서 생성할 수 있습니다."
-                : "녹음을 시작하면 세션 상태가 여기에 표시됩니다."}
-            </p>
-          </div>
-        </div>
+        <Card className="mt-4">
+          <CardHeader className="flex-row items-start justify-between gap-4 pb-3">
+            <div className="flex flex-col gap-1.5">
+              <CardTitle>실시간 전사 스트림</CardTitle>
+              <CardDescription>
+                {isRecording
+                  ? "음성을 듣고 있습니다. 전사는 녹음 종료 후 히스토리에서 생성할 수 있습니다."
+                  : "녹음을 시작하면 세션 상태가 여기에 표시됩니다."}
+              </CardDescription>
+            </div>
+            <Badge variant="partial">확정 대기</Badge>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <CaptionTimeline
+              durationMs={elapsedMs}
+              cursorMs={isRecording ? elapsedMs : null}
+              emptyLabel={isRecording ? "자막 수신 대기 중" : "자막 없음"}
+            />
+            <SpeakerTracks
+              durationMs={elapsedMs}
+              cursorMs={isRecording ? elapsedMs : null}
+              emptyLabel="화자 분리 결과 없음"
+            />
+          </CardContent>
+        </Card>
       </section>
       <MinutesView compact />
     </div>

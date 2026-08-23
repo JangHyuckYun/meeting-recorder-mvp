@@ -82,8 +82,96 @@ pub struct MinutesItem {
     pub evidence_segment_ids: Vec<Uuid>,
 }
 
+/// 48kHz sample index as the canonical clock for audio timing.
+/// Milliseconds are presentation values; the sample index is the source of truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AudioTime(pub i64);
+
+impl AudioTime {
+    pub const SAMPLE_RATE: i64 = 48_000;
+
+    pub fn from_samples(samples: i64) -> Self {
+        Self(samples)
+    }
+
+    pub fn from_ms(ms: i64) -> Self {
+        Self(ms * Self::SAMPLE_RATE / 1000)
+    }
+
+    pub fn as_samples(self) -> i64 {
+        self.0
+    }
+
+    pub fn as_ms(self) -> i64 {
+        self.0 * 1000 / Self::SAMPLE_RATE
+    }
+
+    pub fn diff(self, other: Self) -> i64 {
+        self.0 - other.0
+    }
+
+    pub fn add_samples(self, samples: i64) -> Self {
+        Self(self.0 + samples)
+    }
+
+    pub fn add_ms(self, ms: i64) -> Self {
+        Self(self.0 + ms * Self::SAMPLE_RATE / 1000)
+    }
+}
+
+/// Caption segment lifecycle: live caption may transition PARTIAL→STABLE→COMMITTED→REVISED.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptionStatus {
+    /// Live hypothesis from Zipformer — replaceable, never persisted.
+    Absent,
+    /// Streaming partial from Zipformer, replaceable in frontend buffer.
+    Partial,
+    /// Zipformer endpoint-sealed; frontend freezes this segment.
+    Stable,
+    /// Turbo correction accepted; consumed by minutes pipeline.
+    Committed,
+    /// Overlap separation or offline replacement supersedes a committed segment.
+    Revised,
+}
+
+/// Overlap status for a caption event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverlapInfo {
+    pub speaker_count: u32,
+    pub retired_label: Option<String>,
+}
+
+/// A single caption event emitted by the ASR pipeline and consumed by the frontend.
+/// The canonical clock is `start_sample` / `end_sample` in AudioTime (48kHz sample index).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptionEvent {
+    pub segment_id: Uuid,
+    pub start_sample: i64,
+    pub end_sample: i64,
+    pub text: String,
+    pub status: CaptionStatus,
+    pub speaker_label: Option<String>,
+    pub overlap: Option<OverlapInfo>,
+    /// Segment IDs this revision replaces (for REVISED events).
+    pub supersedes: Vec<Uuid>,
+}
+
+impl CaptionEvent {
+    pub fn duration_ms(&self) -> i64 {
+        AudioTime::from_samples(self.end_sample - self.start_sample).as_ms()
+    }
+
+    pub fn start_ms(&self) -> i64 {
+        AudioTime::from_samples(self.start_sample).as_ms()
+    }
+
+    pub fn end_ms(&self) -> i64 {
+        AudioTime::from_samples(self.end_sample).as_ms()
+    }
+}
+
 /// Which LLM backend generates and edits meeting minutes. Persisted in `app_settings`; the
-/// settings UI switches it at runtime without an app restart.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmProvider {
@@ -245,12 +333,14 @@ pub struct ProviderSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub llm_provider: LlmProvider,
+    pub stt_server_url: Option<String>,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             llm_provider: LlmProvider::Litellm,
+            stt_server_url: Some("ws://192.168.1.189:9090".to_string()),
         }
     }
 }

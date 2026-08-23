@@ -1,6 +1,7 @@
 name: meeting-recorder-stt
 
 services:
+  # ── Legacy WhisperLive (unchanged, kept as rollback) ──────────────────
   whisperlive:
     build:
       context: .
@@ -31,8 +32,6 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       HF_HOME: /root/.cache/huggingface
       PYANNOTE_CACHE: /root/.cache/torch/pyannote
-      # PyTorch 2.6+ changed torch.load's default; pyannote's public
-      # WeSpeaker checkpoint still uses the legacy trusted checkpoint format.
       TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD: "1"
     ports:
       - "9090:9090"
@@ -52,6 +51,206 @@ services:
         - python
         - -c
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── ASR v2 Gateway (CPU, port 9091) ──────────────────────────────────
+  asr-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/asr-v2:latest
+    container_name: meeting-recorder-asr-gateway
+    restart: unless-stopped
+    command: ["python", "/opt/services/asr_gateway.py", "9091"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ""
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "9091:9091"
+    depends_on:
+      - zipformer-worker
+      - sortformer-worker
+      - turbo-worker
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9091/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── RNNoise + Silero VAD (CPU, port 9092) ─────────────────────────────
+  noise-vad:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/asr-v2:latest
+    container_name: meeting-recorder-noise-vad
+    restart: unless-stopped
+    command: ["python", "/opt/services/noise_vad.py", "9092"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ""
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "9092:9092"
+    volumes:
+      - stt-model-cache:/opt/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9092/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Zipformer Korean Streaming ASR (GPU1, port 9093) ──────────────────
+  zipformer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/asr-v2:latest
+    container_name: meeting-recorder-zipformer
+    restart: unless-stopped
+    command: ["python", "/opt/services/zipformer_worker.py", "9093"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      CUPY_CACHE_DIR: /root/.cache/cupy
+    ports:
+      - "9093:9093"
+    volumes:
+      - stt-model-cache:/root/.cache
+      - stt-model-cache:/opt/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9093/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Sortformer Diarization (GPU1, port 9094) ──────────────────────────
+  sortformer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/asr-v2:latest
+    container_name: meeting-recorder-sortformer
+    restart: unless-stopped
+    command: ["python", "/opt/services/sortformer_worker.py", "9094"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "9094:9094"
+    volumes:
+      - stt-model-cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9094/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Turbo Correction (GPU1, port 9095) ────────────────────────────────
+  turbo-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/asr-v2:latest
+    container_name: meeting-recorder-turbo
+    restart: unless-stopped
+    command: ["python", "/opt/services/turbo_worker.py", "9095"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "9095:9095"
+    volumes:
+      - stt-model-cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9095/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── MossFormer2 Overlap Separation (GPU0, port 9096) ──────────────────
+  mossformer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/asr-v2:latest
+    container_name: meeting-recorder-mossformer
+    restart: unless-stopped
+    command: ["python", "/opt/services/mossformer_worker.py", "9096"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "9096:9096"
+    volumes:
+      - stt-model-cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9096/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Offline Finalization + Export (GPU1, port 9097) ───────────────────
+  offline-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-recorder/asr-v2:latest
+    container_name: meeting-recorder-offline
+    restart: unless-stopped
+    command: ["python", "/opt/services/offline_worker.py", "9097"]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "9097:9097"
+    volumes:
+      - stt-model-cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9097/health', timeout=3).read()"]
       interval: 15s
       timeout: 5s
       retries: 5

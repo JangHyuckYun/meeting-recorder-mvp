@@ -1,4 +1,7 @@
 import { useState } from "react";
+// Design system first (tokens + Tailwind layers), then the legacy stylesheet
+// that still skins the screens being migrated. See DESIGN.md §Migration.
+import "./styles/global.css";
 import "./App.css";
 import { AppShell } from "./components/AppShell";
 import { HistoryScreen } from "./screens/HistoryScreen";

@@ -1,0 +1,21 @@
+# Python dependencies for the ASR v2 server services.
+# Base image already provides torch, faster-whisper, pyannote, numpy.
+
+# WebSocket/HTTP framework
+aiohttp==3.9.5
+
+# RNNoise bindings path — system librnnoise needed at build (see Dockerfile)
+# Silero VAD via ONNX Runtime
+onnxruntime-gpu==1.18.1
+
+# sherpa-onnx streaming ASR (CPU+GPU)
+sherpa-onnx==1.10.40
+
+# ClearerVoice-Studio for MossFormer2 overlap separation
+# (optional — pulled at runtime; keep pin for reproducibility)
+
+# NeMo for Sortformer streaming diarization
+nemo_toolkit[asr]>=2.0.0
+
+# Audio
+soundfile>=0.12.1

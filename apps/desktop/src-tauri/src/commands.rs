@@ -1,7 +1,7 @@
 //! Tauri command surface exposed to the webview via IPC. Every command returns
 //! `Result<T, AppError>` (AppError serializes to a display string, see error.rs).
 
-use crate::audio::CaptureSession;
+use crate::audio::capture::CaptureSession;
 use crate::error::{AppError, AppResult};
 use crate::minutes;
 use crate::models::{AppSettings, LlmProvider, MinutesDraft, MinutesItem, Recording, RecordingStatus, TranscriptSegment};
@@ -9,6 +9,8 @@ use crate::storage::Storage;
 use crate::stt::{self, SttConfig};
 use std::path::PathBuf;
 use std::process::Command as ShellCommand;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncBufReadExt;
@@ -17,6 +19,7 @@ use uuid::Uuid;
 pub struct AppState {
     pub storage: Storage,
     pub capture: Mutex<Option<(Uuid, CaptureSession)>>,
+    pub transcription_cancel: Arc<AtomicBool>,
 }
 
 fn recordings_dir(app: &AppHandle) -> AppResult<PathBuf> {
@@ -71,6 +74,18 @@ pub async fn list_recordings(state: State<'_, AppState>) -> AppResult<Vec<Record
     state.storage.list_recordings().await
 }
 
+/// Updates the status of a recording (used for retry/reset).
+#[tauri::command]
+pub async fn update_recording_status(
+    state: State<'_, AppState>,
+    id: String,
+    status: String,
+) -> AppResult<()> {
+    let uuid = Uuid::parse_str(&id).map_err(|e| AppError::InvalidState(format!("bad id: {e}")))?;
+    let rec_status = RecordingStatus::from_db_str(&status);
+    state.storage.update_status(uuid, rec_status).await
+}
+
 #[tauri::command]
 pub async fn get_recording_detail(
     state: State<'_, AppState>,
@@ -103,7 +118,9 @@ pub async fn transcribe_recording(
         .ok_or_else(|| AppError::NotFound(format!("recording {id} not found")))?;
 
     state.storage.update_status(uuid, RecordingStatus::Transcribing).await?;
-    let cfg = SttConfig::default();
+    let settings = state.storage.get_settings().await?;
+    let ws_url = settings.stt_server_url.unwrap_or_else(|| "ws://192.168.1.189:9090".to_string());
+    let cfg = SttConfig { ws_url, ..SttConfig::default() };
     let wav_path = PathBuf::from(&rec.source_path);
     let (progress_sender, mut progress_receiver) =
         tokio::sync::mpsc::unbounded_channel::<stt::TranscriptionProgress>();
@@ -112,8 +129,12 @@ pub async fn transcribe_recording(
             let _ = app.emit("transcription-progress", &progress);
         }
     });
-    let result =
-        stt::transcribe_wav_file(&cfg, uuid, &wav_path, Some(progress_sender)).await;
+
+    // Reset the cancel flag before starting
+    state.transcription_cancel.store(false, Ordering::SeqCst);
+    let cancel_flag = state.transcription_cancel.clone();
+
+    let result = stt::transcribe_wav_file(&cfg, uuid, &wav_path, Some(progress_sender), Some(cancel_flag)).await;
     match result {
         Ok(segments) => {
             state.storage.insert_segments(&segments).await?;
@@ -121,10 +142,22 @@ pub async fn transcribe_recording(
             Ok(segments)
         }
         Err(e) => {
-            state.storage.update_status(uuid, RecordingStatus::Failed).await?;
+            // Check if cancelled — set status back to recorded so retry works
+            if e.to_string().contains("cancelled") {
+                state.storage.update_status(uuid, RecordingStatus::Recorded).await?;
+            } else {
+                state.storage.update_status(uuid, RecordingStatus::Failed).await?;
+            }
             Err(e)
         }
     }
+}
+
+/// Cancels the currently running transcription.
+#[tauri::command]
+pub async fn cancel_transcription(state: State<'_, AppState>) -> AppResult<()> {
+    state.transcription_cancel.store(true, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Ingests an existing audio file (e.g. from the local test-data corpus) that is NOT part of
@@ -188,8 +221,21 @@ pub async fn generate_minutes(
     // Try model_assignments table first; fall back to stored_llm_provider for backward compat.
     if let Some((provider_id, model_name)) = state.storage.get_assigned_provider_model("minutes_generation").await? {
         if let Some(provider) = state.storage.get_provider(provider_id).await? {
+            // Built-in OAuth providers use CLI credentials, not direct API keys.
+            // Route them through the existing OAuth path.
+            if provider.is_builtin {
+                let llm = match provider.provider_type.as_str() {
+                    "openai" => LlmProvider::CodexOauth,
+                    "anthropic" => LlmProvider::ClaudeOauth,
+                    _ => stored_llm_provider(&state.storage).await?,
+                };
+                let draft = minutes::generate_minutes(llm, recording_id, &segments).await?;
+                state.storage.save_minutes(&draft).await?;
+                return Ok(draft);
+            }
+
             let resolved = ResolvedProvider {
-                provider_type: provider.provider_type,
+                provider_type: crate::models::ProviderType::from_db_str(&provider.provider_type).unwrap_or(crate::models::ProviderType::OpenaiCompatible),
                 base_url: provider.base_url.clone(),
                 api_key: provider.api_key_masked.clone(),
                 model: model_name,
@@ -226,6 +272,7 @@ pub async fn get_minutes(
 pub async fn get_app_settings(state: State<'_, AppState>) -> AppResult<AppSettings> {
     Ok(AppSettings {
         llm_provider: stored_llm_provider(&state.storage).await?,
+        stt_server_url: state.storage.get_setting("stt_server_url").await?,
     })
 }
 
@@ -246,7 +293,11 @@ pub async fn set_app_settings(state: State<'_, AppState>, settings: AppSettings)
     state
         .storage
         .set_setting("llm_provider", settings.llm_provider.as_str())
-        .await
+        .await?;
+    if let Some(url) = &settings.stt_server_url {
+        state.storage.set_setting("stt_server_url", url).await?;
+    }
+    Ok(())
 }
 
 /// Inspects local OAuth credential stores for the settings UI.
@@ -418,14 +469,23 @@ pub async fn edit_minutes_item(
     // Try model_assignments table first; fall back to stored_llm_provider.
     let replacement_text = if let Some((provider_id, model_name)) = state.storage.get_assigned_provider_model("minutes_edit").await? {
         if let Some(provider) = state.storage.get_provider(provider_id).await? {
-            use crate::minutes::ResolvedProvider;
-            let resolved = ResolvedProvider {
-                provider_type: provider.provider_type,
-                base_url: provider.base_url.clone(),
-                api_key: provider.api_key_masked.clone(),
-                model: model_name,
-            };
-            minutes::edit_minutes_item_text_with_resolved(resolved, &original, &instruction, &evidence_segments).await?
+            if provider.is_builtin {
+                let llm = match provider.provider_type.as_str() {
+                    "openai" => LlmProvider::CodexOauth,
+                    "anthropic" => LlmProvider::ClaudeOauth,
+                    _ => stored_llm_provider(&state.storage).await?,
+                };
+                minutes::edit_minutes_item_text(llm, &original, &instruction, &evidence_segments).await?
+            } else {
+                use crate::minutes::ResolvedProvider;
+                let resolved = ResolvedProvider {
+                    provider_type: crate::models::ProviderType::from_db_str(&provider.provider_type).unwrap_or(crate::models::ProviderType::OpenaiCompatible),
+                    base_url: provider.base_url.clone(),
+                    api_key: provider.api_key_masked.clone(),
+                    model: model_name,
+                };
+                minutes::edit_minutes_item_text_with_resolved(resolved, &original, &instruction, &evidence_segments).await?
+            }
         } else {
             let llm_provider = stored_llm_provider(&state.storage).await?;
             minutes::edit_minutes_item_text(llm_provider, &original, &instruction, &evidence_segments).await?
@@ -454,7 +514,7 @@ pub async fn edit_minutes_item(
 
 /// Lists all registered providers, both built-in and user-added, with masked API keys.
 #[tauri::command]
-pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<crate::models::Provider>> {
+pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<crate::models::ProviderSummary>> {
     state.storage.list_providers().await
 }
 

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "../formatters";
 import type {
+  AppSettings,
   LlmProvider,
   ModelAssignment,
   ModelAssignmentInput,
@@ -178,6 +179,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // OAuth status (for built-in OAuth providers)
   const [oauthStatuses, setOauthStatuses] = useState<Record<string, OAuthStatus | null>>({});
 
+  // STT server URL
+  const [sttServerUrl, setSttServerUrl] = useState("");
+
   // General
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -211,6 +215,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       } catch (e) {
         setAssignmentError(errorMessage(e));
       }
+
+      // Load current settings (STT server URL, etc.)
+      try {
+        const appSettings = await invoke<AppSettings>("get_app_settings");
+        setSttServerUrl(appSettings.stt_server_url ?? "");
+      } catch { /* ignore */ }
 
       // Load OAuth statuses for built-in providers
       for (const pid of OAUTH_PROVIDER_IDS) {
@@ -289,12 +299,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   const handleSave = () => {
     setIsSaving(true);
-    // Currently assignments are saved on change, so just close.
-    // Legacy app_settings save for backward compat — keep codex_oauth as default fallback.
     void (async () => {
       try {
         await invoke<void>("set_app_settings", {
-          settings: { llm_provider: "codex_oauth" as LlmProvider },
+          settings: {
+            llm_provider: "codex_oauth" as LlmProvider,
+            stt_server_url: sttServerUrl || null,
+          },
         });
         onClose();
       } catch (e) {
@@ -496,6 +507,28 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               </div>
             );
           })}
+        </div>
+
+        {/* ── Panel C: STT Server ──────────────────────────────────── */}
+        <div className="settings-section">
+          <p className="settings-section-label">전사(STT) 서버</p>
+          <p className="settings-subtitle">음성 인식 서버의 WebSocket 주소를 입력하세요.</p>
+          <div className="provider-mgmt-entry">
+            <div className="entry-main">
+              <div className="entry-detail">
+                <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11, fontWeight: 700 }}>
+                  서버 URL
+                  <input
+                    type="text"
+                    value={sttServerUrl}
+                    onChange={(e) => setSttServerUrl(e.target.value)}
+                    placeholder="ws://192.168.1.189:9090"
+                    style={{ width: "100%", height: 38, padding: "0 10px", fontSize: 12, borderRadius: 9, border: "1px solid hsl(var(--border))", background: "hsl(var(--surface))" }}
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* ── Save / Cancel ────────────────────────────────────────── */}

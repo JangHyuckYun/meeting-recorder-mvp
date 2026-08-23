@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { SettingsModal } from "./SettingsModal";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 type AppView = "live" | "history" | "import";
 
@@ -87,7 +88,9 @@ export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
         </button>
       </aside>
       <main className="workspace">{children}</main>
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <ErrorBoundary>
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      </ErrorBoundary>
     </div>
   );
 }
