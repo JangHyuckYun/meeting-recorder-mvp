@@ -49,6 +49,7 @@ pub fn run() {
             commands::get_app_settings,
             commands::set_app_settings,
             commands::get_oauth_status,
+            commands::start_oauth_login,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

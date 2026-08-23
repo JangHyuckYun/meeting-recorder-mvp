@@ -80,6 +80,18 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
+  const [loginOutput, setLoginOutput] = useState<Record<OAuthProviderId, string[]>>({
+    codex_oauth: [],
+    claude_oauth: [],
+  });
+  const [loginUrls, setLoginUrls] = useState<Record<OAuthProviderId, string | null>>({
+    codex_oauth: null,
+    claude_oauth: null,
+  });
+  const [loginRunning, setLoginRunning] = useState<Record<OAuthProviderId, boolean>>({
+    codex_oauth: false,
+    claude_oauth: false,
+  });
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const copyTimerRef = useRef<number | null>(null);
@@ -144,6 +156,51 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     [],
   );
 
+  useEffect(() => {
+    if (!open) return;
+    let unlistenOutput: (() => void) | undefined;
+    let unlistenUrl: (() => void) | undefined;
+    let unlistenDone: (() => void) | undefined;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlistenOutput = await listen<{ provider: string; line: string }>(
+        "oauth-login-output",
+        (event) => {
+          const provider = event.payload.provider as OAuthProviderId;
+          setLoginOutput((prev) => ({
+            ...prev,
+            [provider]: [...(prev[provider] ?? []), event.payload.line],
+          }));
+        },
+      );
+      unlistenUrl = await listen<{ provider: string; url: string }>(
+        "oauth-login-url",
+        (event) => {
+          const provider = event.payload.provider as OAuthProviderId;
+          setLoginUrls((prev) => ({ ...prev, [provider]: event.payload.url }));
+        },
+      );
+      unlistenDone = await listen<{ provider: string; success: boolean }>(
+        "oauth-login-done",
+        async (event) => {
+          const provider = event.payload.provider as OAuthProviderId;
+          setLoginRunning((prev) => ({ ...prev, [provider]: false }));
+          try {
+            const status = await invoke<OAuthStatus>("get_oauth_status", { provider });
+            setOauthState((prev) => ({ ...prev, [provider]: { kind: "ready", status } }));
+          } catch {
+            setOauthState((prev) => ({ ...prev, [provider]: { kind: "error" } }));
+          }
+        },
+      );
+    })();
+    return () => {
+      if (unlistenOutput) unlistenOutput();
+      if (unlistenUrl) unlistenUrl();
+      if (unlistenDone) unlistenDone();
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const copyCommand = async (command: string) => {
@@ -152,6 +209,28 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       setCopiedCommand(command);
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopiedCommand(null), 1500);
+    } catch (error) {
+      setSaveError(errorMessage(error));
+    }
+  };
+
+  const handleLogin = async (provider: OAuthProviderId, method?: string) => {
+    setLoginRunning((prev) => ({ ...prev, [provider]: true }));
+    setLoginOutput((prev) => ({ ...prev, [provider]: [] }));
+    setLoginUrls((prev) => ({ ...prev, [provider]: null }));
+    setSaveError(null);
+    try {
+      await invoke<string>("start_oauth_login", { provider, method: method ?? null });
+    } catch (error) {
+      setSaveError(errorMessage(error));
+      setLoginRunning((prev) => ({ ...prev, [provider]: false }));
+    }
+  };
+
+  const handleOpenUrl = async (url: string) => {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
     } catch (error) {
       setSaveError(errorMessage(error));
     }
@@ -169,6 +248,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       setIsSaving(false);
     }
   };
+
+  const selectedIsOAuth = selected !== "litellm";
+  const activeLoginProvider = selected as OAuthProviderId;
 
   return (
     <div
@@ -232,8 +314,58 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           })}
         </div>
 
+        {selectedIsOAuth && (
+          <div className="oauth-login-panel">
+            <p className="settings-section-label">바로 로그인</p>
+            <div className="oauth-login-actions">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => void handleLogin(activeLoginProvider)}
+                disabled={loginRunning[activeLoginProvider]}
+              >
+                {loginRunning[activeLoginProvider] ? "로그인 진행 중..." : "브라우저로 로그인"}
+              </button>
+              {activeLoginProvider === "codex_oauth" && (
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => void handleLogin("codex_oauth", "device")}
+                  disabled={loginRunning.codex_oauth}
+                >
+                  기기 코드로 로그인
+                </button>
+              )}
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => void handleLogin(activeLoginProvider)}
+                disabled={loginRunning[activeLoginProvider]}
+                title="상태 새로고침"
+              >
+                상태 새로고침
+              </button>
+            </div>
+            {loginUrls[activeLoginProvider] && (
+              <button
+                type="button"
+                className="oauth-url"
+                onClick={() => void handleOpenUrl(loginUrls[activeLoginProvider]!)}
+              >
+                브라우저에서 열기: {loginUrls[activeLoginProvider]}
+              </button>
+            )}
+            {loginOutput[activeLoginProvider].length > 0 && (
+              <pre className="oauth-output">{loginOutput[activeLoginProvider].join("\n")}</pre>
+            )}
+            {loginRunning[activeLoginProvider] && (
+              <p className="oauth-running">브라우저에서 인증을 완료하면 자동으로 반영됩니다…</p>
+            )}
+          </div>
+        )}
+
         <div className="settings-guide">
-          <p>구독 로그인이 만료되면 터미널에서 아래 명령으로 다시 로그인하세요.</p>
+          <p>터미널에서 직접 로그인하려면 아래 명령을 사용하세요.</p>
           <div className="settings-guide-commands">
             {RELOGIN_COMMANDS.map(({ label, command }) => (
               <button

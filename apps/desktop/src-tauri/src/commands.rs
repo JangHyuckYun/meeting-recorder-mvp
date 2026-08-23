@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::process::Command as ShellCommand;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
 
 pub struct AppState {
@@ -233,6 +234,134 @@ pub async fn set_app_settings(state: State<'_, AppState>, settings: AppSettings)
 #[tauri::command]
 pub async fn get_oauth_status(provider: String) -> AppResult<crate::minutes::oauth_status::OAuthStatus> {
     crate::minutes::oauth_status::inspect(&provider)
+}
+
+/// Starts an interactive OAuth login flow for the selected provider. Spawns the
+/// provider's CLI (`codex login` / `claude auth login`) in the background, streams
+/// its stdout/stderr to the webview via `oauth-login-output` events, and emits
+/// `oauth-login-url` when an https:// URL is detected so the UI can offer a
+/// one-click "브라우저에서 열기". The CLI writes tokens to its standard credential
+/// store on success; the UI should re-query `get_oauth_status` after receiving
+/// `oauth-login-done`.
+#[tauri::command]
+pub async fn start_oauth_login(
+    app: AppHandle,
+    provider: String,
+    method: Option<String>,
+) -> AppResult<String> {
+    let (binary, args): (&str, Vec<&str>) = match provider.as_str() {
+        "codex_oauth" => {
+            let use_device = method.as_deref() == Some("device");
+            if use_device {
+                ("codex", vec!["login", "--device-auth"])
+            } else {
+                ("codex", vec!["login"])
+            }
+        }
+        "claude_oauth" => ("claude", vec!["auth", "login"]),
+        other => {
+            return Err(AppError::InvalidState(format!(
+                "unknown oauth provider `{other}`; expected `codex_oauth` or `claude_oauth`"
+            )))
+        }
+    };
+
+    let app_clone = app.clone();
+    let provider_clone = provider.clone();
+    tokio::spawn(async move {
+        let emit = |event: &str, payload: serde_json::Value| {
+            let _ = app_clone.emit(event, payload);
+        };
+
+        let mut cmd = tokio::process::Command::new(binary);
+        cmd.args(&args);
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Ok(home) = std::env::var("HOME") {
+            let nvm_bin = format!("{home}/.nvm/versions/node/v24.14.0/bin");
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let augmented = format!("{nvm_bin}:/opt/homebrew/bin:/usr/local/bin:{current_path}");
+            cmd.env("PATH", augmented);
+        }
+
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                emit(
+                    "oauth-login-output",
+                    serde_json::json!({
+                        "provider": provider_clone,
+                        "line": format!("Failed to spawn `{binary}`: {error}. Is the CLI installed and on PATH?")
+                    }),
+                );
+                emit(
+                    "oauth-login-done",
+                    serde_json::json!({"provider": provider_clone, "success": false}),
+                );
+                return;
+            }
+        };
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let provider_for_stdout = provider_clone.clone();
+        let app_for_stdout = app_clone.clone();
+        let stdout_task = tokio::spawn(async move {
+            if let Some(stdout) = stdout {
+                let mut reader = tokio::io::BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    if let Some(url_start) = line.find("https://") {
+                        let url = line[url_start..]
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .trim_end_matches(|c| ['.', ',', ')', ']', '"', '\''].contains(&c));
+                        if !url.is_empty() {
+                            let _ = app_for_stdout.emit(
+                                "oauth-login-url",
+                                serde_json::json!({"provider": provider_for_stdout, "url": url}),
+                            );
+                        }
+                    }
+                    let _ = app_for_stdout.emit(
+                        "oauth-login-output",
+                        serde_json::json!({"provider": provider_for_stdout, "line": line}),
+                    );
+                }
+            }
+        });
+
+        let provider_for_stderr = provider_clone.clone();
+        let app_for_stderr = app_clone.clone();
+        let stderr_task = tokio::spawn(async move {
+            if let Some(stderr) = stderr {
+                let mut reader = tokio::io::BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let _ = app_for_stderr.emit(
+                        "oauth-login-output",
+                        serde_json::json!({"provider": provider_for_stderr, "line": line}),
+                    );
+                }
+            }
+        });
+
+        let status = child.wait().await;
+        let _ = tokio::join!(stdout_task, stderr_task);
+        let success = status.map(|s| s.success()).unwrap_or(false);
+        emit(
+            "oauth-login-done",
+            serde_json::json!({"provider": provider_clone, "success": success}),
+        );
+        if success {
+            emit(
+                "oauth-login-output",
+                serde_json::json!({"provider": provider_clone, "line": "Login process finished — credential status will refresh on next check."}),
+            );
+        }
+    });
+
+    Ok(format!("Spawning `{binary}` login flow…"))
 }
 
 #[tauri::command]
