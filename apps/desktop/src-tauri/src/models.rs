@@ -27,6 +27,15 @@ pub struct Folder {
     pub created_at: DateTime<Utc>,
 }
 
+/// A user-authored minutes template. `content` is appended to the minutes system prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Template {
+    pub id: Uuid,
+    pub name: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingStatus {

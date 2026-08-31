@@ -316,12 +316,15 @@ pub async fn ingest_audio_file(
 pub async fn generate_minutes(
     state: State<'_, AppState>,
     recording_id: String,
+    template_id: Option<String>,
 ) -> AppResult<MinutesDraft> {
     use crate::minutes::ResolvedProvider;
 
     let recording_id = Uuid::parse_str(&recording_id)
         .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
     let segments = state.storage.list_segments(recording_id).await?;
+    let template = load_template_content(&state.storage, template_id.as_deref()).await?;
+    let template = template.as_deref();
 
     // Try model_assignments table first; fall back to stored_llm_provider for backward compat.
     if let Some((provider_id, model_name)) = state
@@ -338,7 +341,8 @@ pub async fn generate_minutes(
                     "anthropic" => LlmProvider::ClaudeOauth,
                     _ => stored_llm_provider(&state.storage).await?,
                 };
-                let draft = minutes::generate_minutes(llm, recording_id, &segments).await?;
+                let draft =
+                    minutes::generate_minutes(llm, recording_id, &segments, template).await?;
                 state.storage.save_minutes(&draft).await?;
                 return Ok(draft);
             }
@@ -350,8 +354,13 @@ pub async fn generate_minutes(
                 api_key: provider.api_key_masked.clone(),
                 model: model_name,
             };
-            let draft =
-                minutes::generate_minutes_with_resolved(resolved, recording_id, &segments).await?;
+            let draft = minutes::generate_minutes_with_resolved(
+                resolved,
+                recording_id,
+                &segments,
+                template,
+            )
+            .await?;
             state.storage.save_minutes(&draft).await?;
             return Ok(draft);
         }
@@ -359,7 +368,7 @@ pub async fn generate_minutes(
 
     // Fallback: stored llm_provider setting
     let llm_provider = stored_llm_provider(&state.storage).await?;
-    let draft = minutes::generate_minutes(llm_provider, recording_id, &segments).await?;
+    let draft = minutes::generate_minutes(llm_provider, recording_id, &segments, template).await?;
     state.storage.save_minutes(&draft).await?;
     Ok(draft)
 }
@@ -419,6 +428,61 @@ pub async fn set_elevenlabs_api_key(state: State<'_, AppState>, api_key: String)
         .storage
         .set_setting("elevenlabs_api_key", &api_key)
         .await
+}
+
+// ------------------------------------------------------------------
+// Minutes templates
+// ------------------------------------------------------------------
+
+/// Resolves an optional template id to its content. An absent/blank id means "no template";
+/// an id that does not exist is an error so the user is not silently given ungoverned minutes.
+async fn load_template_content(
+    storage: &Storage,
+    template_id: Option<&str>,
+) -> AppResult<Option<String>> {
+    let Some(id) = template_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    let uuid =
+        Uuid::parse_str(id).map_err(|e| AppError::InvalidState(format!("bad template id: {e}")))?;
+    let template = storage
+        .get_template(uuid)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("template {id} not found")))?;
+    Ok(Some(template.content))
+}
+
+#[tauri::command]
+pub async fn list_templates(state: State<'_, AppState>) -> AppResult<Vec<crate::models::Template>> {
+    state.storage.list_templates().await
+}
+
+#[tauri::command]
+pub async fn create_template(
+    state: State<'_, AppState>,
+    name: String,
+    content: String,
+) -> AppResult<crate::models::Template> {
+    state.storage.create_template(&name, &content).await
+}
+
+#[tauri::command]
+pub async fn update_template(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    content: String,
+) -> AppResult<()> {
+    let uuid = Uuid::parse_str(&id)
+        .map_err(|e| AppError::InvalidState(format!("bad template id: {e}")))?;
+    state.storage.update_template(uuid, &name, &content).await
+}
+
+#[tauri::command]
+pub async fn delete_template(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let uuid = Uuid::parse_str(&id)
+        .map_err(|e| AppError::InvalidState(format!("bad template id: {e}")))?;
+    state.storage.delete_template(uuid).await
 }
 
 // ------------------------------------------------------------------

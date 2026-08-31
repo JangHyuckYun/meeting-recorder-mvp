@@ -175,6 +175,88 @@ impl Storage {
         Ok(())
     }
 
+    // ------------------------------------------------------------------
+    // Minutes templates
+    // ------------------------------------------------------------------
+
+    pub async fn list_templates(&self) -> AppResult<Vec<crate::models::Template>> {
+        let rows = sqlx::query(
+            "SELECT id, name, content, created_at FROM templates ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_template).collect())
+    }
+
+    pub async fn get_template(&self, id: Uuid) -> AppResult<Option<crate::models::Template>> {
+        let row = sqlx::query("SELECT id, name, content, created_at FROM templates WHERE id = ?1")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(row_to_template))
+    }
+
+    pub async fn create_template(
+        &self,
+        name: &str,
+        content: &str,
+    ) -> AppResult<crate::models::Template> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::InvalidState(
+                "template name cannot be empty".to_string(),
+            ));
+        }
+        let template = crate::models::Template {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            content: content.to_string(),
+            created_at: chrono::Utc::now(),
+        };
+        sqlx::query(
+            "INSERT INTO templates (id, name, content, created_at) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(template.id.to_string())
+        .bind(&template.name)
+        .bind(&template.content)
+        .bind(template.created_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(template)
+    }
+
+    pub async fn update_template(&self, id: Uuid, name: &str, content: &str) -> AppResult<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::InvalidState(
+                "template name cannot be empty".to_string(),
+            ));
+        }
+        let affected = sqlx::query("UPDATE templates SET name = ?2, content = ?3 WHERE id = ?1")
+            .bind(id.to_string())
+            .bind(name)
+            .bind(content)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("template {id} not found")));
+        }
+        Ok(())
+    }
+
+    pub async fn delete_template(&self, id: Uuid) -> AppResult<()> {
+        let deleted = sqlx::query("DELETE FROM templates WHERE id = ?1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if deleted == 0 {
+            return Err(AppError::NotFound(format!("template {id} not found")));
+        }
+        Ok(())
+    }
+
     pub async fn insert_segments(&self, segments: &[TranscriptSegment]) -> AppResult<()> {
         let mut tx = self.pool.begin().await?;
         for seg in segments {
@@ -509,6 +591,19 @@ fn row_to_folder(row: &sqlx::sqlite::SqliteRow) -> crate::models::Folder {
     crate::models::Folder {
         id: Uuid::parse_str(row.get::<String, _>("id").as_str()).unwrap_or_default(),
         name: row.get("name"),
+        created_at: chrono::DateTime::parse_from_rfc3339(
+            row.get::<String, _>("created_at").as_str(),
+        )
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now()),
+    }
+}
+
+fn row_to_template(row: &sqlx::sqlite::SqliteRow) -> crate::models::Template {
+    crate::models::Template {
+        id: Uuid::parse_str(row.get::<String, _>("id").as_str()).unwrap_or_default(),
+        name: row.get("name"),
+        content: row.get("content"),
         created_at: chrono::DateTime::parse_from_rfc3339(
             row.get::<String, _>("created_at").as_str(),
         )

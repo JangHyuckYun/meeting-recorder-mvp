@@ -1,12 +1,15 @@
 //! LLM-backed generation and focused editing of grounded meeting minutes.
 
+pub(crate) mod cache;
 mod claude_provider;
 mod oauth_provider;
-pub(crate) mod cache;
 pub(crate) mod oauth_status;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{CaptionEvent, CaptionStatus, LlmProvider, MinutesDraft, MinutesItem, ProviderType, TranscriptSegment};
+use crate::models::{
+    CaptionEvent, CaptionStatus, LlmProvider, MinutesDraft, MinutesItem, ProviderType,
+    TranscriptSegment,
+};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -57,6 +60,7 @@ pub async fn generate_minutes(
     provider: LlmProvider,
     recording_id: Uuid,
     segments: &[TranscriptSegment],
+    template: Option<&str>,
 ) -> AppResult<MinutesDraft> {
     let final_segments: Vec<&TranscriptSegment> = segments
         .iter()
@@ -84,19 +88,13 @@ pub async fn generate_minutes(
         AppError::InvalidState(format!("failed to serialize transcript for LLM: {error}"))
     })?;
 
-    let system_prompt = concat!(
-        "당신은 한국어 회의록 작성자입니다. 제공된 전사에 명시된 사실만 사용해 간결한 한국어 요약, 결정, 할 일을 작성하세요. ",
-        "명시적으로 합의된 내용만 decisions에 넣고, 실제로 요청되거나 약속된 업무만 action_items에 넣으세요. ",
-        "모든 decision/action_item은 최소 1개의 evidence_segment_ids를 가져야 한다. ",
-        "evidence_segment_ids에는 해당 항목을 직접 뒷받침하는 입력 세그먼트의 id만 원문 그대로 넣으세요. ",
-        "근거가 없는 항목은 만들지 마세요. JSON 스키마 이외의 텍스트를 출력하지 마세요."
-    );
+    let system_prompt = minutes_system_prompt(template);
     let user_prompt = format!(
         "다음 전사 세그먼트로 한국어 회의록을 작성하세요. 각 결정과 할 일에 직접 관련된 세그먼트 id를 인용하세요.\n\n{transcript_json}"
     );
 
     let content =
-        request_structured_json(provider, system_prompt, &user_prompt, minutes_schema()).await?;
+        request_structured_json(provider, &system_prompt, &user_prompt, minutes_schema()).await?;
     let valid_segment_ids = final_segments
         .iter()
         .map(|segment| segment.id)
@@ -298,7 +296,10 @@ pub async fn request_structured_json_by_type(
             let endpoint = if base_url.trim().is_empty() {
                 "https://api.openai.com/v1/chat/completions".to_string()
             } else {
-                format!("{}/chat/completions", base_url.trim_end_matches('/').trim_end_matches("/v1"))
+                format!(
+                    "{}/chat/completions",
+                    base_url.trim_end_matches('/').trim_end_matches("/v1")
+                )
             };
             let mut request = client.post(&endpoint).json(&json!({
                 "model": model,
@@ -319,14 +320,17 @@ pub async fn request_structured_json_by_type(
             if !api_key.trim().is_empty() {
                 request = request.bearer_auth(api_key);
             }
-            let completion: ChatCompletion = request.send().await?.error_for_status()?.json().await?;
+            let completion: ChatCompletion =
+                request.send().await?.error_for_status()?.json().await?;
             completion
                 .choices
                 .into_iter()
                 .next()
                 .map(|choice| choice.message.content)
                 .filter(|content| !content.trim().is_empty())
-                .ok_or_else(|| AppError::InvalidState("LLM returned no response content".to_string()))
+                .ok_or_else(|| {
+                    AppError::InvalidState("LLM returned no response content".to_string())
+                })
         }
         ProviderType::Anthropic => {
             let endpoint = if base_url.trim().is_empty() {
@@ -334,7 +338,8 @@ pub async fn request_structured_json_by_type(
             } else {
                 format!("{}/v1/messages", base_url.trim_end_matches('/'))
             };
-            let mut request = client.post(&endpoint)
+            let mut request = client
+                .post(&endpoint)
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
                 .json(&json!({
@@ -366,7 +371,9 @@ pub async fn request_structured_json_by_type(
                 .as_array()
                 .and_then(|arr| arr.first())
                 .and_then(|block| block["text"].as_str())
-                .ok_or_else(|| AppError::InvalidState("Anthropic response missing content[0].text".to_string()))?;
+                .ok_or_else(|| {
+                    AppError::InvalidState("Anthropic response missing content[0].text".to_string())
+                })?;
             Ok(content.to_string())
         }
     }
@@ -387,6 +394,7 @@ pub async fn generate_minutes_with_resolved(
     resolved: ResolvedProvider,
     recording_id: Uuid,
     segments: &[TranscriptSegment],
+    template: Option<&str>,
 ) -> AppResult<MinutesDraft> {
     let final_segments: Vec<&TranscriptSegment> = segments
         .iter()
@@ -414,13 +422,7 @@ pub async fn generate_minutes_with_resolved(
         AppError::InvalidState(format!("failed to serialize transcript for LLM: {error}"))
     })?;
 
-    let system_prompt = concat!(
-        "당신은 한국어 회의록 작성자입니다. 제공된 전사에 명시된 사실만 사용해 간결한 한국어 요약, 결정, 할 일을 작성하세요. ",
-        "명시적으로 합의된 내용만 decisions에 넣고, 실제로 요청되거나 약속된 업무만 action_items에 넣으세요. ",
-        "모든 decision/action_item은 최소 1개의 evidence_segment_ids를 가져야 한다. ",
-        "evidence_segment_ids에는 해당 항목을 직접 뒷받침하는 입력 세그먼트의 id만 원문 그대로 넣으세요. ",
-        "근거가 없는 항목은 만들지 마세요. JSON 스키마 이외의 텍스트를 출력하지 마세요."
-    );
+    let system_prompt = minutes_system_prompt(template);
     let user_prompt = format!(
         "다음 전사 세그먼트로 한국어 회의록을 작성하세요. 각 결정과 할 일에 직접 관련된 세그먼트 id를 인용하세요.\n\n{transcript_json}"
     );
@@ -430,7 +432,7 @@ pub async fn generate_minutes_with_resolved(
         &resolved.base_url,
         &resolved.api_key,
         &resolved.model,
-        system_prompt,
+        &system_prompt,
         &user_prompt,
         &minutes_schema(),
     )
@@ -507,6 +509,25 @@ pub async fn edit_minutes_item_text_with_resolved(
     Ok(text)
 }
 
+/// The minutes system prompt, with an optional user template appended. The template is the
+/// single prompt-customization point: it constrains style/sections but never relaxes the
+/// evidence-grounding contract above it.
+pub fn minutes_system_prompt(template: Option<&str>) -> String {
+    const BASE: &str = concat!(
+        "당신은 한국어 회의록 작성자입니다. 제공된 전사에 명시된 사실만 사용해 간결한 한국어 요약, 결정, 할 일을 작성하세요. ",
+        "명시적으로 합의된 내용만 decisions에 넣고, 실제로 요청되거나 약속된 업무만 action_items에 넣으세요. ",
+        "모든 decision/action_item은 최소 1개의 evidence_segment_ids를 가져야 한다. ",
+        "evidence_segment_ids에는 해당 항목을 직접 뒷받침하는 입력 세그먼트의 id만 원문 그대로 넣으세요. ",
+        "근거가 없는 항목은 만들지 마세요. JSON 스키마 이외의 텍스트를 출력하지 마세요."
+    );
+    match template.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(template) => format!(
+            "{BASE}\n\n다음 사용자 템플릿의 형식과 항목 구성을 따르되, 위의 근거 규칙은 그대로 지키세요:\n{template}"
+        ),
+        None => BASE.to_string(),
+    }
+}
+
 fn minutes_schema() -> Value {
     let item_schema = json!({
         "type": "object",
@@ -549,19 +570,15 @@ fn edit_schema() -> Value {
 pub fn filter_caption_segments_for_minutes(events: &[CaptionEvent]) -> Vec<TranscriptSegment> {
     events
         .iter()
-        .filter(|ev| {
-            matches!(ev.status, CaptionStatus::Committed | CaptionStatus::Revised)
-        })
-        .map(|ev| {
-            TranscriptSegment {
-                id: ev.segment_id,
-                recording_id: uuid::Uuid::default(),
-                start_ms: ev.start_ms(),
-                end_ms: ev.end_ms(),
-                speaker_label: ev.speaker_label.clone().unwrap_or_default(),
-                text: ev.text.clone(),
-                is_final: true,
-            }
+        .filter(|ev| matches!(ev.status, CaptionStatus::Committed | CaptionStatus::Revised))
+        .map(|ev| TranscriptSegment {
+            id: ev.segment_id,
+            recording_id: uuid::Uuid::default(),
+            start_ms: ev.start_ms(),
+            end_ms: ev.end_ms(),
+            speaker_label: ev.speaker_label.clone().unwrap_or_default(),
+            text: ev.text.clone(),
+            is_final: true,
         })
         .collect()
 }
