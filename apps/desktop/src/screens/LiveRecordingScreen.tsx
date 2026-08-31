@@ -1,11 +1,64 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CaptionTimeline, SpeakerTracks, WavVisualizer } from "@/components/canvas";
+import type { CaptionSpan, CaptionState, SpeakerTrack } from "@/components/canvas";
 import { Badge, Button } from "@/components/ui";
+import type { CaptionEventData } from "@/hooks/useCaptionEvents";
+import { useCaptionEvents } from "@/hooks/useCaptionEvents";
 import { cn } from "@/lib/utils";
 import { appClient } from "@/platform/appClient";
 import { MinutesView } from "../components/MinutesView";
 import { errorMessage, formatDuration } from "../formatters";
 import type { Recording } from "../types";
+
+/** ~16kHz mono capture sample rate the ASR pipeline reports segment bounds in. */
+const SAMPLE_RATE_HZ = 16_000;
+const samplesToMs = (samples: number) => (samples / SAMPLE_RATE_HZ) * 1000;
+
+/** Stable, insertion-order speaker lane index keyed by the segment's speaker label. */
+function useSpeakerLanes(segments: CaptionEventData[]) {
+  return useMemo(() => {
+    const order: string[] = [];
+    for (const segment of segments) {
+      const key = segment.speaker_label ?? "미상";
+      if (!order.includes(key)) order.push(key);
+    }
+    return order;
+  }, [segments]);
+}
+
+function toCaptionSpans(segments: CaptionEventData[]): CaptionSpan[] {
+  const lanes = new Map<string, number>();
+  let nextLane = 0;
+  return segments
+    .map((segment) => {
+      const key = segment.speaker_label ?? "미상";
+      if (!lanes.has(key)) lanes.set(key, nextLane++);
+      return {
+        id: segment.segment_id,
+        startMs: samplesToMs(segment.start_sample),
+        endMs: samplesToMs(segment.end_sample),
+        state: segment.status === "absent" ? "partial" : (segment.status as CaptionState),
+        speakerIndex: segment.speaker_label ? (lanes.get(key) ?? null) : null,
+        overlap: Boolean(segment.overlap && segment.overlap.speaker_count > 1),
+      };
+    })
+    .sort((a, b) => a.startMs - b.startMs);
+}
+
+function toSpeakerTracks(segments: CaptionEventData[], laneOrder: string[]): SpeakerTrack[] {
+  return laneOrder.map((label, index) => ({
+    id: label,
+    label,
+    colorIndex: index,
+    segments: segments
+      .filter((segment) => (segment.speaker_label ?? "미상") === label)
+      .map((segment) => ({
+        startMs: samplesToMs(segment.start_sample),
+        endMs: samplesToMs(segment.end_sample),
+        overlap: Boolean(segment.overlap && segment.overlap.speaker_count > 1),
+      })),
+  }));
+}
 
 export function LiveRecordingScreen() {
   const [title, setTitle] = useState("");
@@ -15,6 +68,22 @@ export function LiveRecordingScreen() {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const { segments } = useCaptionEvents();
+
+  const orderedSegments = useMemo(
+    () => Array.from(segments.values()).sort((a, b) => a.start_sample - b.start_sample),
+    [segments],
+  );
+  const speakerLanes = useSpeakerLanes(orderedSegments);
+  const captionSpans = useMemo(() => toCaptionSpans(orderedSegments), [orderedSegments]);
+  const speakerTracks = useMemo(
+    () => toSpeakerTracks(orderedSegments, speakerLanes),
+    [orderedSegments, speakerLanes],
+  );
+  const captionDurationMs = Math.max(
+    elapsedMs,
+    captionSpans.length > 0 ? captionSpans[captionSpans.length - 1].endMs : 0,
+  );
 
   useEffect(() => {
     if (!isRecording || startedAt === null) return;
@@ -141,15 +210,39 @@ export function LiveRecordingScreen() {
             </header>
             <div className="live-stream-body">
               <CaptionTimeline
-                durationMs={elapsedMs}
+                captions={captionSpans}
+                durationMs={captionDurationMs}
                 cursorMs={isRecording ? elapsedMs : null}
                 emptyLabel={isRecording ? "자막 수신 대기 중" : "자막 없음"}
               />
               <SpeakerTracks
-                durationMs={elapsedMs}
+                speakers={speakerTracks}
+                durationMs={captionDurationMs}
                 cursorMs={isRecording ? elapsedMs : null}
                 emptyLabel="화자 분리 결과 없음"
               />
+              <div className="live-transcript ds-scroll">
+                {orderedSegments.length === 0 ? (
+                  <p className="live-transcript-empty">
+                    {isRecording ? "자막 수신 대기 중" : "자막 없음"}
+                  </p>
+                ) : (
+                  orderedSegments.map((segment) => (
+                    <div
+                      key={segment.segment_id}
+                      className={cn("live-transcript-line", `is-${segment.status}`)}
+                    >
+                      <span className="live-transcript-speaker">
+                        {segment.speaker_label ?? "화자 미분류"}
+                      </span>
+                      <span className="live-transcript-text">{segment.text}</span>
+                    </div>
+                  ))
+                )}
+                <p className="live-transcript-note">
+                  실시간에는 화자가 갈리지 않아요 · 종료 시 전체 재분석으로 화자 태그가 붙습니다
+                </p>
+              </div>
             </div>
           </section>
         </div>
