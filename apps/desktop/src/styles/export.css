@@ -1,0 +1,143 @@
+/* Export surface (S7) — format picker + preview, app-shell register.
+ * Tokens: styles/global.css. */
+
+.export-screen {
+  height: 100%;
+  overflow-y: auto;
+  background: hsl(var(--surface));
+}
+
+.export-header {
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.export-eyebrow {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.export-header h1 {
+  margin: 6px 0 0;
+  color: hsl(var(--foreground));
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.export-body {
+  max-width: 720px;
+  padding: 20px 24px 32px;
+}
+
+.export-formats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.export-format {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  text-align: left;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+
+.export-format[aria-pressed="true"] {
+  border-color: hsl(var(--primary));
+  box-shadow: inset 0 0 0 1px hsl(var(--primary));
+}
+
+.export-format:disabled {
+  color: hsl(var(--subtle-foreground));
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.export-format-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  color: hsl(var(--slate-600));
+  font-size: 11px;
+  font-weight: 700;
+  background: hsl(var(--surface-sunken));
+  border-radius: var(--radius-md);
+  flex: none;
+}
+
+.export-format-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.export-format-name {
+  font-weight: 600;
+}
+
+.export-format-desc {
+  margin-top: 2px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.export-format-dot {
+  flex: none;
+  color: hsl(var(--slate-300));
+}
+
+.export-format[aria-pressed="true"] .export-format-dot {
+  color: hsl(var(--primary));
+}
+
+.export-preview {
+  padding: 12px;
+  margin-bottom: 16px;
+  color: hsl(var(--slate-300));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  background: hsl(var(--slate-900));
+  border-radius: var(--radius-lg);
+}
+
+.export-preview-label {
+  margin-bottom: 6px;
+  color: hsl(var(--slate-500));
+}
+
+.export-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-result {
+  margin-top: 14px;
+  padding: 9px 12px;
+  color: hsl(var(--success-soft-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+  background: hsl(var(--success-soft));
+  border: 1px solid hsl(var(--success) / 0.25);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
+.export-result code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
