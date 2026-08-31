@@ -4,7 +4,10 @@ import { AskScreen } from "./AskScreen";
 
 vi.mock("@/platform/appClient", () => ({
   appClient: {
-    askNote: vi.fn().mockResolvedValue({ answer: "결정사항은 A입니다.", sources: ["seg-1"] }),
+    askNote: vi.fn().mockResolvedValue({
+      answer: "결정사항은 A입니다.",
+      sources: [{ segment_id: "seg-1", start_ms: 65_000, end_ms: 70_000 }],
+    }),
   },
 }));
 
@@ -18,6 +21,6 @@ describe("AskScreen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "전송" }));
     await waitFor(() => expect(screen.getByText("결정사항은 A입니다.")).toBeTruthy());
-    expect(screen.getByText(/seg-1/)).toBeTruthy();
+    expect(screen.getByText("근거 · 01:05")).toBeTruthy();
   });
 });

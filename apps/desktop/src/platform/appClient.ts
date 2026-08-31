@@ -37,9 +37,15 @@ export interface Template {
 
 export type ExportFormat = "srt" | "vtt" | "md" | "txt";
 
+export interface AskSource {
+  readonly segment_id: string;
+  readonly start_ms: number;
+  readonly end_ms: number;
+}
+
 export interface AskNoteResult {
-  answer: string;
-  sources: string[];
+  readonly answer: string;
+  readonly sources: readonly AskSource[];
 }
 
 export interface TranscriptionProgressEvent {

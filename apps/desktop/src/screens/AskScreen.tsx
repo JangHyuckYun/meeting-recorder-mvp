@@ -1,10 +1,6 @@
-/** S9 — Ask (note Q&A). Cited sources render as chips under the answer.
- * ponytail: appClient.AskNoteResult.sources is string[] (segment ids), not the
- * richer {segment_id,start_ms,end_ms} shape from the mockup spec — chips show
- * the id as-is since no timestamps are available from the backend yet. */
 import { useState } from "react";
 import { Badge, Button } from "@/components/ui";
-import { appClient } from "@/platform/appClient";
+import { appClient, type AskNoteResult } from "@/platform/appClient";
 import { errorMessage } from "../formatters";
 import "../styles/ask.css";
 
@@ -15,10 +11,16 @@ interface AskScreenProps {
 interface ChatTurn {
   question: string;
   answer: string;
-  sources: string[];
+  sources: AskNoteResult["sources"];
 }
 
 const SUGGESTIONS = ["결정사항만 요약", "내 액션 아이템은?", "화자별 발언 정리", "마감 기한 정리"];
+
+function formatTimestamp(milliseconds: number): string {
+  const minutes = Math.floor(milliseconds / 60_000);
+  const seconds = Math.floor(milliseconds / 1_000) % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 export function AskScreen({ recordingId }: AskScreenProps) {
   const [question, setQuestion] = useState("");
@@ -71,9 +73,9 @@ export function AskScreen({ recordingId }: AskScreenProps) {
                   <div className="ask-bubble-answer-text">{turn.answer}</div>
                   {turn.sources.length > 0 && (
                     <div className="ask-sources">
-                      {turn.sources.map((source, idx) => (
-                        <span key={idx} className="ask-source-chip" data-numeric>
-                          근거 · {source}
+                      {turn.sources.map((source) => (
+                        <span key={source.segment_id} className="ask-source-chip" data-numeric>
+                          근거 · {formatTimestamp(source.start_ms)}
                         </span>
                       ))}
                     </div>
