@@ -532,6 +532,34 @@ pub async fn assign_recording_folder(
         .await
 }
 
+/// Per-recording speaker display names, keyed by diarization label ("화자 1" → "김민지").
+/// Empty when the user has never renamed anyone.
+#[tauri::command]
+pub async fn get_speaker_names(
+    state: State<'_, AppState>,
+    recording_id: String,
+) -> AppResult<std::collections::BTreeMap<String, String>> {
+    let uuid = Uuid::parse_str(&recording_id)
+        .map_err(|e| AppError::InvalidState(format!("bad recording id: {e}")))?;
+    state.storage.get_speaker_names(uuid).await
+}
+
+/// Renames one speaker for one recording. A blank `name` clears the override.
+#[tauri::command]
+pub async fn set_speaker_name(
+    state: State<'_, AppState>,
+    recording_id: String,
+    speaker_key: String,
+    name: String,
+) -> AppResult<()> {
+    let uuid = Uuid::parse_str(&recording_id)
+        .map_err(|e| AppError::InvalidState(format!("bad recording id: {e}")))?;
+    state
+        .storage
+        .set_speaker_name(uuid, &speaker_key, &name)
+        .await
+}
+
 /// Returns the persisted STT glossary (keyterms). Empty when never set.
 #[tauri::command]
 pub async fn get_glossary(state: State<'_, AppState>) -> AppResult<Vec<String>> {

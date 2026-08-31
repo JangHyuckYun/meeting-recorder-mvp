@@ -62,6 +62,8 @@ pub fn run() {
             commands::create_folder,
             commands::delete_folder,
             commands::assign_recording_folder,
+            commands::get_speaker_names,
+            commands::set_speaker_name,
             commands::get_glossary,
             commands::set_glossary,
             commands::get_oauth_status,

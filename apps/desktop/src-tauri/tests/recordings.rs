@@ -58,6 +58,65 @@ async fn delete_recording_removes_row_and_child_segments() {
 }
 
 #[tokio::test]
+async fn speaker_names_are_per_recording_and_clearable() {
+    let (_dir, storage) = storage("speaker-names-test.sqlite3").await;
+    let first = recording("회의 1", "/tmp/1.wav");
+    let second = recording("회의 2", "/tmp/2.wav");
+    storage.insert_recording(&first).await.expect("insert");
+    storage.insert_recording(&second).await.expect("insert");
+
+    assert!(storage
+        .get_speaker_names(first.id)
+        .await
+        .expect("names should load on a fresh recording")
+        .is_empty());
+
+    storage
+        .set_speaker_name(first.id, "화자 1", "김민지")
+        .await
+        .expect("set");
+    storage
+        .set_speaker_name(first.id, "화자 2", "박준")
+        .await
+        .expect("set");
+    storage
+        .set_speaker_name(second.id, "화자 1", "다른 사람")
+        .await
+        .expect("set");
+
+    let names = storage.get_speaker_names(first.id).await.expect("get");
+    assert_eq!(names.get("화자 1").map(String::as_str), Some("김민지"));
+    assert_eq!(names.get("화자 2").map(String::as_str), Some("박준"));
+    // The map is scoped to one recording.
+    assert_eq!(
+        storage
+            .get_speaker_names(second.id)
+            .await
+            .expect("get")
+            .get("화자 1")
+            .map(String::as_str),
+        Some("다른 사람")
+    );
+
+    // A blank name clears the override rather than storing an empty display name.
+    storage
+        .set_speaker_name(first.id, "화자 1", "  ")
+        .await
+        .expect("clear");
+    let names = storage.get_speaker_names(first.id).await.expect("get");
+    assert!(!names.contains_key("화자 1"));
+    assert!(names.contains_key("화자 2"));
+
+    // Deleting the recording takes its speaker names with it.
+    storage.delete_recording(first.id).await.expect("delete");
+    assert!(storage
+        .get_speaker_names(first.id)
+        .await
+        .expect("get")
+        .is_empty());
+}
+
+#[tokio::test]
 async fn folder_assignment_roundtrips_and_survives_folder_deletion() {
     let (_dir, storage) = storage("folders-test.sqlite3").await;
     let rec = recording("주간 회의", "/tmp/a.wav");

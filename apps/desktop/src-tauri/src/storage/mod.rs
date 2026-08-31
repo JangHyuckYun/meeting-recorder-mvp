@@ -100,6 +100,10 @@ impl Storage {
                 .execute(&mut *tx)
                 .await?;
         }
+        sqlx::query("DELETE FROM app_settings WHERE key = ?1")
+            .bind(speaker_names_key(id))
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -415,6 +419,49 @@ impl Storage {
             .unwrap_or_default())
     }
 
+    /// Per-recording speaker display names, keyed by the diarization label
+    /// (e.g. "화자 1" → "김민지"). Stored as one JSON object per recording in the settings KV
+    /// rather than its own table — the map is tiny and always read whole.
+    pub async fn get_speaker_names(
+        &self,
+        recording_id: Uuid,
+    ) -> AppResult<std::collections::BTreeMap<String, String>> {
+        Ok(self
+            .get_setting(&speaker_names_key(recording_id))
+            .await?
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default())
+    }
+
+    /// Sets one speaker's display name. A blank name clears the override.
+    pub async fn set_speaker_name(
+        &self,
+        recording_id: Uuid,
+        speaker_key: &str,
+        name: &str,
+    ) -> AppResult<()> {
+        let speaker_key = speaker_key.trim();
+        if speaker_key.is_empty() {
+            return Err(AppError::InvalidState(
+                "speaker key cannot be empty".to_string(),
+            ));
+        }
+        let mut names = self.get_speaker_names(recording_id).await?;
+        match name.trim() {
+            "" => {
+                names.remove(speaker_key);
+            }
+            name => {
+                names.insert(speaker_key.to_string(), name.to_string());
+            }
+        }
+        let json = serde_json::to_string(&names).map_err(|error| {
+            AppError::InvalidState(format!("failed to serialize speaker names: {error}"))
+        })?;
+        self.set_setting(&speaker_names_key(recording_id), &json)
+            .await
+    }
+
     pub async fn set_glossary(&self, terms: &[String]) -> AppResult<()> {
         let cleaned: Vec<&str> = terms
             .iter()
@@ -567,6 +614,10 @@ impl Storage {
             .await?;
         Ok(rows.iter().map(row_to_assignment).collect())
     }
+}
+
+fn speaker_names_key(recording_id: Uuid) -> String {
+    format!("speaker_names:{recording_id}")
 }
 
 fn row_to_recording(row: &sqlx::sqlite::SqliteRow) -> Recording {
