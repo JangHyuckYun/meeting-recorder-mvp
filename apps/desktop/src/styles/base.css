@@ -1,0 +1,104 @@
+/* Shared structural styles for the desktop surfaces. Tokens: global.css. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 880px;
+  min-height: 640px;
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid hsl(var(--ring) / 0.35);
+  outline-offset: 2px;
+}
+
+.live-screen,
+.history-detail-screen {
+  display: grid;
+  grid-template-columns: minmax(440px, 1.04fr) minmax(400px, 0.96fr);
+  height: 100%;
+  background: hsl(var(--surface));
+}
+
+.transcript-panel,
+.minutes-view {
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.evidence-badge {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
+.title-field input::placeholder,
+.instruction-editor textarea::placeholder {
+  color: hsl(var(--subtle-foreground));
+}
+
+/* Primary buttons must not stay blue-tinted while disabled. */
+button.bg-primary:disabled {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
+  box-shadow: none;
+}
+
+.record-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.error-banner {
+  margin-top: 14px;
+  padding: 11px 14px;
+  color: hsl(var(--destructive-soft-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+  background: hsl(var(--destructive-soft));
+  border: 1px solid hsl(var(--destructive) / 0.25);
+  border-radius: 10px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1050px) {
+  .app-shell { grid-template-columns: 76px minmax(0, 1fr); }
+  .sidebar { padding-inline: 6px; }
+  .live-screen,
+  .history-detail-screen { grid-template-columns: minmax(400px, 1fr) minmax(360px, 0.9fr); }
+  .transcript-panel { padding: 28px 26px; }
+  .minutes-view { padding: 28px 24px 0; }
+  .evidence-badge { display: none; }
+  .minutes-item { grid-template-columns: auto minmax(0, 1fr); }
+}
+
+@keyframes settings-fade {
+  from { opacity: 0; }
+}
+
+@keyframes settings-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}

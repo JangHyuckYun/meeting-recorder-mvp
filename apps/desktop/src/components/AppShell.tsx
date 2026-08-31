@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import { SettingsModal } from "./SettingsModal";
 import { ErrorBoundary } from "./ErrorBoundary";
 
@@ -37,6 +38,12 @@ function ImportIcon() {
   );
 }
 
+const NAV_ITEMS: { view: AppView; label: string; title: string; Icon: () => ReactNode }[] = [
+  { view: "live", label: "실시간", title: "실시간 녹음", Icon: MicIcon },
+  { view: "history", label: "히스토리", title: "녹음 히스토리", Icon: HistoryIcon },
+  { view: "import", label: "가져오기", title: "가져오기", Icon: ImportIcon },
+];
+
 export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -47,45 +54,32 @@ export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
           M
         </div>
         <nav className="sidebar-nav">
-          <button
-            className={`nav-button ${activeView === "live" ? "active" : ""}`}
-            type="button"
-            aria-label="실시간 녹음"
-            aria-current={activeView === "live" ? "page" : undefined}
-            onClick={() => onNavigate("live")}
-          >
-            <MicIcon />
-            <span>실시간</span>
-          </button>
-          <button
-            className={`nav-button ${activeView === "history" ? "active" : ""}`}
-            type="button"
-            aria-label="녹음 히스토리"
-            aria-current={activeView === "history" ? "page" : undefined}
-            onClick={() => onNavigate("history")}
-          >
-            <HistoryIcon />
-            <span>히스토리</span>
-          </button>
-          <button
-            className={`nav-button ${activeView === "import" ? "active" : ""}`}
-            type="button"
-            aria-label="가져오기"
-            aria-current={activeView === "import" ? "page" : undefined}
-            onClick={() => onNavigate("import")}
-          >
-            <ImportIcon />
-            <span>가져오기</span>
-          </button>
+          {NAV_ITEMS.map(({ view, label, title, Icon }) => (
+            <button
+              key={view}
+              className={cn("nav-button", activeView === view && "active")}
+              type="button"
+              title={title}
+              aria-label={title}
+              aria-current={activeView === view ? "page" : undefined}
+              onClick={() => onNavigate(view)}
+            >
+              <Icon />
+              <span>{label}</span>
+            </button>
+          ))}
         </nav>
-        <button
-          type="button"
-          className="profile-dot"
-          aria-label="설정 열기"
-          onClick={() => setSettingsOpen(true)}
-        >
-          윤
-        </button>
+        <div className="sidebar-footer">
+          <button
+            type="button"
+            className="profile-dot"
+            title="설정 열기"
+            aria-label="설정 열기"
+            onClick={() => setSettingsOpen(true)}
+          >
+            윤
+          </button>
+        </div>
       </aside>
       <main className="workspace">{children}</main>
       <ErrorBoundary>

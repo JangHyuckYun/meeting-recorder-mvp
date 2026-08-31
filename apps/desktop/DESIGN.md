@@ -8,6 +8,51 @@ primitives live in `src/components/ui`; audio/transcript visualizations live in
 
 If a value is not in this document, it does not belong in a component.
 
+## 0. Direction — pro tool, not a landing page
+
+Minute looks like an instrument a professional keeps open all day: dense,
+editorial, quiet. The reference implementation is the app shell
+([`AppShell.tsx`](src/components/AppShell.tsx) +
+[`src/styles/shell.css`](src/styles/shell.css)); every surface matches its
+register.
+
+**Do**
+
+- **Density over air.** Rows before cards. 8–16px padding inside chrome, 4px
+  vertical rhythm, controls at 28–32px tall. Screen real estate belongs to
+  content, not to margins.
+- **Hierarchy by weight and size, not by boxes.** One eyebrow, one title, one
+  supporting line. Metadata is 11px `--muted-foreground`, separated by a middot
+  or a hairline — not wrapped in its own bordered container.
+- **Hairlines carry structure.** 1px `--border` seams and `inset 0 0 0 1px`
+  rings define regions. Shadows (`--shadow-md`+) are reserved for things that
+  genuinely float: dialogs, popovers, select menus.
+- **Numbers are data.** Every timecode, duration, level, count and size gets
+  `data-numeric` (mono + tabular figures) so columns align and digits stop
+  jittering.
+- **One restrained blue.** The accent marks exactly one thing per view: the
+  active nav item, the primary action, the live/revised state. A second blue
+  object on screen means one of them is wrong. Everything else is slate.
+- **Left-aligned, flush.** Text and controls share a left rail. Centering is for
+  a genuinely empty state, nothing else.
+- **State is legible standing still.** Selection is a fill plus a 2px accent
+  edge; disabled is opacity; live is one pulsing dot. Motion is 120–160ms and
+  always optional.
+
+**Don't**
+
+- Uniform rounded bordered cards with identical shadows in a grid.
+- Big empty hero blocks, centered welcome copy, decorative icon medallions.
+- Purple, gradients, glassmorphism / `backdrop-filter`, colored glow shadows.
+- Pill-shaped everything: radii are tight (2–12px); `rounded-full` is for dots
+  and status badges only.
+- Inlined literals. If the value is not a token, add the token in
+  [`global.css`](src/styles/global.css) first — surface stylesheets consume
+  tokens, they never define them.
+
+The shell owns the rail and the app chrome; each screen owns its own header. No
+surface prints a second page title.
+
 ## 1. Principles
 
 1. **Neutral by mandate.** Slate is the base, one blue is the accent. No purple,
@@ -120,8 +165,9 @@ not decorative:
 
 | Token / class | Value | Meaning |
 | --- | --- | --- |
-| `--rail-width` / `w-rail` | 88px | Left navigation rail |
-| `--statusbar-height` / `h-statusbar` | 56px | Live session status bar |
+| `--rail-width` / `w-rail` | 72px | Left navigation rail |
+| `--header-height` | 52px | Shared top-chrome baseline: rail brand block and every screen header |
+| `--statusbar-height` / `h-statusbar` | 48px | Live session status bar |
 | `--dialog-body-max-h` | 60vh | Scroll ceiling for `DialogBody` |
 
 Canvas geometry cannot use utility classes, so
@@ -133,7 +179,7 @@ every pixel constant from the same `GRID = 4` base (`WAVE`, `TIMELINE`,
 
 | Radius | Value | Use |
 | --- | --- | --- |
-| `rounded-xs` … `rounded-2xl` | 4 / 6 / 8 / 12 / 16 / 20px | controls → chips → fields → cards → panels → dialogs |
+| `rounded-xs` … `rounded-2xl` | 2 / 4 / 6 / 8 / 10 / 12px | markers → controls → fields → cards → panels → dialogs |
 | `rounded-full` | pill | badges, dots |
 
 | Shadow | Use |

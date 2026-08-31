@@ -4,7 +4,7 @@
 use crate::audio::capture::CaptureSession;
 use crate::error::{AppError, AppResult};
 use crate::minutes;
-use crate::models::{AppSettings, LlmProvider, MinutesDraft, MinutesItem, Recording, RecordingStatus, TranscriptSegment};
+use crate::models::{AppSettings, LlmProvider, MinutesDraft, MinutesItem, Recording, RecordingStatus, SttEngine, TranscriptSegment};
 use crate::storage::Storage;
 use crate::stt::{self, SttConfig};
 use std::path::PathBuf;
@@ -119,22 +119,78 @@ pub async fn transcribe_recording(
 
     state.storage.update_status(uuid, RecordingStatus::Transcribing).await?;
     let settings = state.storage.get_settings().await?;
-    let ws_url = settings.stt_server_url.unwrap_or_else(|| "ws://192.168.1.189:9090".to_string());
-    let cfg = SttConfig { ws_url, ..SttConfig::default() };
     let wav_path = PathBuf::from(&rec.source_path);
-    let (progress_sender, mut progress_receiver) =
-        tokio::sync::mpsc::unbounded_channel::<stt::TranscriptionProgress>();
-    tokio::spawn(async move {
-        while let Some(progress) = progress_receiver.recv().await {
-            let _ = app.emit("transcription-progress", &progress);
+
+    let result = match settings.stt_engine {
+        SttEngine::Elevenlabs => {
+            let api_key = state
+                .storage
+                .elevenlabs_api_key()
+                .await?
+                .filter(|key| !key.trim().is_empty());
+            if let Some(api_key) = api_key {
+                let cfg = stt::elevenlabs::ElevenLabsConfig {
+                    api_key,
+                    language_code: Some("ko".to_string()),
+                    num_speakers: None,
+                    ..Default::default()
+                };
+                let total_ms = rec.duration_ms.unwrap_or_default();
+                let _ = app.emit(
+                    "transcription-progress",
+                    stt::TranscriptionProgress {
+                        recording_id: uuid,
+                        sent_ms: total_ms,
+                        total_ms,
+                        phase: stt::ProgressPhase::Finalizing,
+                    },
+                );
+                let result = stt::elevenlabs::transcribe_wav_file(&cfg, uuid, &wav_path).await;
+                if result.is_ok() {
+                    let _ = app.emit(
+                        "transcription-progress",
+                        stt::TranscriptionProgress {
+                            recording_id: uuid,
+                            sent_ms: total_ms,
+                            total_ms,
+                            phase: stt::ProgressPhase::Done,
+                        },
+                    );
+                }
+                result
+            } else {
+                Err(AppError::InvalidState(
+                    "ElevenLabs API 키가 설정되지 않았습니다".to_string(),
+                ))
+            }
         }
-    });
+        SttEngine::SelfHosted => {
+            let ws_url = settings
+                .stt_server_url
+                .unwrap_or_else(|| "ws://192.168.1.189:9090".to_string());
+            let cfg = SttConfig { ws_url, ..SttConfig::default() };
+            let (progress_sender, mut progress_receiver) =
+                tokio::sync::mpsc::unbounded_channel::<stt::TranscriptionProgress>();
+            tokio::spawn(async move {
+                while let Some(progress) = progress_receiver.recv().await {
+                    let _ = app.emit("transcription-progress", &progress);
+                }
+            });
 
-    // Reset the cancel flag before starting
-    state.transcription_cancel.store(false, Ordering::SeqCst);
-    let cancel_flag = state.transcription_cancel.clone();
+            // Reset the cancel flag before starting
+            state.transcription_cancel.store(false, Ordering::SeqCst);
+            let cancel_flag = state.transcription_cancel.clone();
 
-    let result = stt::transcribe_wav_file(&cfg, uuid, &wav_path, Some(progress_sender), Some(cancel_flag)).await;
+            stt::transcribe_wav_file(
+                &cfg,
+                uuid,
+                &wav_path,
+                Some(progress_sender),
+                Some(cancel_flag),
+            )
+            .await
+        }
+    };
     match result {
         Ok(segments) => {
             state.storage.insert_segments(&segments).await?;
@@ -270,10 +326,7 @@ pub async fn get_minutes(
 /// settings UI's initial state.
 #[tauri::command]
 pub async fn get_app_settings(state: State<'_, AppState>) -> AppResult<AppSettings> {
-    Ok(AppSettings {
-        llm_provider: stored_llm_provider(&state.storage).await?,
-        stt_server_url: state.storage.get_setting("stt_server_url").await?,
-    })
+    state.storage.get_settings().await
 }
 
 /// Reads the persisted LLM provider, falling back to the LiteLLM default for keys never saved
@@ -297,7 +350,23 @@ pub async fn set_app_settings(state: State<'_, AppState>, settings: AppSettings)
     if let Some(url) = &settings.stt_server_url {
         state.storage.set_setting("stt_server_url", url).await?;
     }
+    state
+        .storage
+        .set_setting("stt_engine", settings.stt_engine.as_str())
+        .await?;
     Ok(())
+}
+
+/// Persists the ElevenLabs secret separately from the settings roundtrip.
+#[tauri::command]
+pub async fn set_elevenlabs_api_key(
+    state: State<'_, AppState>,
+    api_key: String,
+) -> AppResult<()> {
+    state
+        .storage
+        .set_setting("elevenlabs_api_key", &api_key)
+        .await
 }
 
 /// Inspects local OAuth credential stores for the settings UI.

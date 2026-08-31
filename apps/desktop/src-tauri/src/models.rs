@@ -171,7 +171,33 @@ impl CaptionEvent {
     }
 }
 
-/// Which LLM backend generates and edits meeting minutes. Persisted in `app_settings`; the
+/// Which STT backend transcribes recordings. Persisted in `app_settings`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SttEngine {
+    #[default]
+    SelfHosted,
+    Elevenlabs,
+}
+
+impl SttEngine {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SttEngine::SelfHosted => "self_hosted",
+            SttEngine::Elevenlabs => "elevenlabs",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        match value {
+            "self_hosted" => Some(SttEngine::SelfHosted),
+            "elevenlabs" => Some(SttEngine::Elevenlabs),
+            _ => None,
+        }
+    }
+}
+
+/// Which LLM backend generates and edits meeting minutes. Persisted in `app_settings`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmProvider {
@@ -334,6 +360,8 @@ pub struct ProviderSummary {
 pub struct AppSettings {
     pub llm_provider: LlmProvider,
     pub stt_server_url: Option<String>,
+    pub stt_engine: SttEngine,
+    pub elevenlabs_api_key_masked: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -341,6 +369,8 @@ impl Default for AppSettings {
         Self {
             llm_provider: LlmProvider::Litellm,
             stt_server_url: Some("ws://192.168.1.189:9090".to_string()),
+            stt_engine: SttEngine::SelfHosted,
+            elevenlabs_api_key_masked: None,
         }
     }
 }

@@ -79,9 +79,14 @@ export interface ProviderInput {
 /// New settings UI uses Provider and ModelAssignment instead.
 export type LlmProvider = "litellm" | "codex_oauth" | "claude_oauth";
 
+/// Which STT backend transcribes recordings. Mirrors the Rust `SttEngine` enum.
+export type SttEngine = "self_hosted" | "elevenlabs";
+
 export interface AppSettings {
   llm_provider: LlmProvider;
   stt_server_url: string | null;
+  stt_engine: SttEngine;
+  elevenlabs_api_key_masked: string | null;
 }
 
 export interface OAuthStatus {

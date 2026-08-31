@@ -1,0 +1,367 @@
+/* Settings surface — a preferences pane in the app-shell register (DESIGN.md §0):
+ * one chrome bar, hairline seams between regions, rows instead of cards, data in
+ * mono. Tokens: styles/global.css. Primitives: components/ui.
+ * All surface stylesheets are imported together by App.tsx, so the cascade stays
+ * global; the split is organizational so each surface owns its own file. */
+
+/* ---- shell: scrim, panel, chrome ------------------------------------ */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: hsl(var(--foreground) / 0.45);
+  animation: settings-fade var(--motion-base) var(--ease-out);
+}
+
+.settings-panel {
+  display: flex;
+  width: 100%;
+  max-width: 42rem;
+  max-height: min(88vh, 46rem);
+  flex-direction: column;
+  overflow: hidden;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-overlay);
+  outline: none;
+  animation: settings-rise var(--motion-slow) var(--ease-out);
+}
+
+/* Header sits on the shared top-chrome baseline, like every screen header. */
+.settings-header {
+  display: flex;
+  min-height: var(--header-height);
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.settings-eyebrow {
+  margin: 0;
+  color: hsl(var(--subtle-foreground));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.settings-header h2 {
+  margin: 4px 0 0;
+  color: hsl(var(--foreground));
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.settings-tabbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: hsl(var(--surface-sunken));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* Flush alert strip: the panel already has its own seams, so the banner
+ * drops its own radius and side borders. */
+.settings-alert {
+  flex: none;
+  margin: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.settings-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* ---- sections ------------------------------------------------------- */
+
+.settings-tab-panel {
+  margin: 0;
+}
+
+.settings-section {
+  padding: 14px 16px 16px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.settings-tab-panel > .settings-section:first-child {
+  border-top: 0;
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-section-label {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.settings-subtitle {
+  margin: 6px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settings-hint {
+  margin: 8px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settings-hint code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: hsl(var(--slate-700));
+}
+
+.empty-small {
+  margin-top: 10px;
+  padding: 12px 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* ---- rows: providers ------------------------------------------------ */
+
+.settings-rows {
+  margin-top: 10px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.provider-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.entry-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.entry-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.entry-name {
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.entry-type {
+  color: hsl(var(--subtle-foreground));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.entry-detail {
+  margin-top: 4px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.entry-detail code {
+  font-size: 10px;
+  color: hsl(var(--slate-700));
+}
+
+/* Models are data, not chips: one mono line, middot separated. */
+.entry-models {
+  margin-top: 4px;
+  color: hsl(var(--subtle-foreground));
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.entry-models span + span::before {
+  content: " · ";
+  color: hsl(var(--border-strong));
+}
+
+.provider-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.provider-status::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: none;
+  background: currentColor;
+  border-radius: 9999px;
+}
+
+.provider-status.ok {
+  color: hsl(var(--success));
+}
+
+.provider-status.warn {
+  color: hsl(var(--warning));
+}
+
+.provider-status.off {
+  color: hsl(var(--destructive));
+}
+
+.provider-status.pending {
+  color: hsl(var(--subtle-foreground));
+}
+
+.entry-actions {
+  flex: none;
+}
+
+/* ---- rows: model assignment + fields --------------------------------- */
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.settings-row-label {
+  min-width: 0;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-row-label span {
+  display: block;
+  margin-top: 2px;
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.settings-controls {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+}
+
+.settings-input,
+.settings-select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+/* Native <select> kept for accessibility; only the OS chrome is replaced. */
+.settings-select {
+  padding-right: 24px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, hsl(var(--muted-foreground)) 50%),
+    linear-gradient(135deg, hsl(var(--muted-foreground)) 50%, transparent 50%);
+  background-repeat: no-repeat;
+  background-position: calc(100% - 14px) 14px, calc(100% - 10px) 14px;
+  background-size: 5px 5px;
+  appearance: none;
+}
+
+.settings-input:hover,
+.settings-select:hover {
+  border-color: hsl(var(--border-strong));
+}
+
+.settings-input::placeholder {
+  color: hsl(var(--subtle-foreground));
+}
+
+/* ---- add-provider form ---------------------------------------------- */
+
+.add-provider-form {
+  margin-top: 10px;
+  padding: 12px;
+  background: hsl(var(--surface-sunken));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+.add-provider-form h4 {
+  margin: 0;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.add-provider-form .settings-row {
+  border-bottom-color: hsl(var(--border));
+}
+
+.add-provider-form .settings-row:last-of-type {
+  border-bottom: 0;
+}
+
+.add-provider-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid hsl(var(--border));
+}

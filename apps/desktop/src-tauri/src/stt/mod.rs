@@ -1,7 +1,12 @@
-//! Client for the self-hosted WhisperLive STT + online speaker-diarization server
-//! (infra/stt-server/, deployed on 192.168.1.189 GPU1). Talks the WhisperLive WebSocket
-//! protocol: send a JSON session-config handshake, stream raw f32 PCM frames, receive JSON
-//! transcription messages with per-segment `start`/`end`/`text`/`speaker`/`completed`.
+//! Client for the self-hosted WhisperLive STT server (infra/stt-server/, deployed on 192.168.1.189).
+//!
+//! Two transcription modes:
+//! - **REST API (default):** POSTs the WAV file to `/v1/audio/transcriptions`.
+//!   Processes at GPU speed with no pacing overhead. Best for file transcription.
+//! - **WebSocket (diarization):** streams f32 PCM frames with real-time pacing.
+//!   Supports speaker diarization. Used as fallback.
+
+pub mod elevenlabs;
 
 use crate::error::{AppError, AppResult};
 use crate::models::TranscriptSegment;
@@ -21,6 +26,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct SttConfig {
     pub ws_url: String,
+    pub rest_url: String,
     pub language: String,
     pub model: String,
     pub max_speakers: u32,
@@ -31,6 +37,7 @@ impl Default for SttConfig {
     fn default() -> Self {
         Self {
             ws_url: "ws://192.168.1.189:9090".to_string(),
+            rest_url: "http://192.168.1.189:9091".to_string(),
             language: "ko".to_string(),
             model: "large-v3-turbo".to_string(),
             max_speakers: 4,

@@ -72,3 +72,7 @@ curl -fsS http://192.168.1.189:9091/v1/audio/transcriptions \
   -F response_format=verbose_json \
   -F file=@sample.m4a
 ```
+
+## Web serving
+
+For LAN/web serving instructions for the desktop frontend, see [`apps/desktop/WEB_SERVE.md`](../../apps/desktop/WEB_SERVE.md).

@@ -9,7 +9,10 @@ import type {
   OAuthStatus,
   Provider,
   ProviderInput,
+  SttEngine,
 } from "../types";
+import { Button } from "./ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 interface SettingsModalProps {
   open: boolean;
@@ -50,6 +53,11 @@ const PROVIDER_TYPE_OPTIONS = [
   { value: "openai_compatible", label: "OpenAI 호환 (vLLM, Ollama 등)" },
 ];
 
+const STT_ENGINE_OPTIONS: { value: SttEngine; label: string }[] = [
+  { value: "self_hosted", label: "자체 모델 서버" },
+  { value: "elevenlabs", label: "ElevenLabs (Scribe)" },
+];
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function describeOAuthStatus(status: OAuthStatus | null): { tone: string; text: string } {
@@ -62,6 +70,14 @@ function describeOAuthStatus(status: OAuthStatus | null): { tone: string; text: 
     tone: "ok",
     text: `만료: ${new Date(status.expires_at).toLocaleString("ko-KR")} · 정상`,
   };
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────
@@ -99,18 +115,23 @@ function AddProviderForm({
   return (
     <div className="add-provider-form">
       <h4>새 공급자 추가</h4>
-      <label>
-        이름
+      <label className="settings-row">
+        <span className="settings-row-label">이름</span>
         <input
+          className="settings-input"
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="예: My OpenAI, 로컬 vLLM"
         />
       </label>
-      <label>
-        유형
-        <select value={providerType} onChange={(e) => setProviderType(e.target.value)}>
+      <label className="settings-row">
+        <span className="settings-row-label">유형</span>
+        <select
+          className="settings-select"
+          value={providerType}
+          onChange={(e) => setProviderType(e.target.value)}
+        >
           {PROVIDER_TYPE_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -119,46 +140,50 @@ function AddProviderForm({
         </select>
       </label>
       {providerType !== "openai" && (
-        <label>
-          Base URL
+        <label className="settings-row">
+          <span className="settings-row-label">Base URL</span>
           <input
+            className="settings-input"
             type="text"
+            data-numeric
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             placeholder="예: http://localhost:8000/v1"
           />
         </label>
       )}
-      <label>
-        API 키
+      <label className="settings-row">
+        <span className="settings-row-label">API 키</span>
         <input
+          className="settings-input"
           type="password"
+          data-numeric
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="sk-…"
         />
       </label>
-      <label>
-        모델 목록 (JSON 배열)
+      <label className="settings-row">
+        <span className="settings-row-label">
+          모델 목록
+          <span>JSON 배열</span>
+        </span>
         <input
+          className="settings-input"
           type="text"
+          data-numeric
           value={modelsJson}
           onChange={(e) => setModelsJson(e.target.value)}
           placeholder='["gpt-4o", "gpt-4.1-mini"]'
         />
       </label>
       <div className="add-provider-actions">
-        <button type="button" className="button secondary" onClick={onCancel} disabled={saving}>
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
           취소
-        </button>
-        <button
-          type="button"
-          className="button primary"
-          onClick={() => void handleSave()}
-          disabled={saving || !name.trim()}
-        >
+        </Button>
+        <Button size="sm" onClick={() => void handleSave()} disabled={saving || !name.trim()}>
           {saving ? "추가 중..." : "추가"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -179,8 +204,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // OAuth status (for built-in OAuth providers)
   const [oauthStatuses, setOauthStatuses] = useState<Record<string, OAuthStatus | null>>({});
 
-  // STT server URL
+  // Voice / STT state
   const [sttServerUrl, setSttServerUrl] = useState("");
+  const [sttEngine, setSttEngine] = useState<SttEngine>("self_hosted");
+  const [elevenLabsKeyMasked, setElevenLabsKeyMasked] = useState<string | null>(null);
+  const [elevenLabsKeyInput, setElevenLabsKeyInput] = useState("");
+  const [isSavingKey, setIsSavingKey] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
 
   // General
   const [error, setError] = useState<string | null>(null);
@@ -189,11 +219,20 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   // ── Load data on open ────────────────────────────────────────────────
 
+  const loadAppSettings = async () => {
+    const appSettings = await invoke<AppSettings>("get_app_settings");
+    setSttServerUrl(appSettings.stt_server_url ?? "");
+    setSttEngine(appSettings.stt_engine ?? "self_hosted");
+    setElevenLabsKeyMasked(appSettings.elevenlabs_api_key_masked ?? null);
+  };
+
   useEffect(() => {
     if (!open) return;
     setShowAddForm(false);
     setError(null);
     setAssignmentError(null);
+    setVoiceError(null);
+    setElevenLabsKeyInput("");
 
     const load = async () => {
       try {
@@ -216,10 +255,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         setAssignmentError(errorMessage(e));
       }
 
-      // Load current settings (STT server URL, etc.)
+      // Load current settings (STT server URL, engine, masked key)
       try {
-        const appSettings = await invoke<AppSettings>("get_app_settings");
-        setSttServerUrl(appSettings.stt_server_url ?? "");
+        await loadAppSettings();
       } catch { /* ignore */ }
 
       // Load OAuth statuses for built-in providers
@@ -297,6 +335,22 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   };
 
+  const handleSaveElevenLabsKey = async () => {
+    const apiKey = elevenLabsKeyInput.trim();
+    if (!apiKey) return;
+    setIsSavingKey(true);
+    setVoiceError(null);
+    try {
+      await invoke<void>("set_elevenlabs_api_key", { apiKey });
+      setElevenLabsKeyInput("");
+      await loadAppSettings();
+    } catch (e) {
+      setVoiceError(errorMessage(e));
+    } finally {
+      setIsSavingKey(false);
+    }
+  };
+
   const handleSave = () => {
     setIsSaving(true);
     void (async () => {
@@ -305,7 +359,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           settings: {
             llm_provider: "codex_oauth" as LlmProvider,
             stt_server_url: sttServerUrl || null,
-          },
+            stt_engine: sttEngine,
+            elevenlabs_api_key_masked: elevenLabsKeyMasked,
+          } satisfies AppSettings,
         });
         onClose();
       } catch (e) {
@@ -338,7 +394,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       }}
     >
       <div
-        className="settings-panel settings-panel-wide"
+        className="settings-panel"
         role="dialog"
         aria-modal="true"
         aria-label="설정"
@@ -347,203 +403,303 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       >
         <header className="settings-header">
           <div>
-            <p className="eyebrow">SETTINGS</p>
-            <h2>AI 공급자</h2>
-            <p className="settings-subtitle">LLM 공급자를 등록하고 용도별 모델을 할당하세요.</p>
+            <p className="settings-eyebrow">SETTINGS</p>
+            <h2>환경 설정</h2>
           </div>
-          <button type="button" className="settings-close" aria-label="설정 닫기" onClick={onClose}>
-            ✕
-          </button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            aria-label="설정 닫기"
+            onClick={onClose}
+          >
+            <CloseIcon />
+          </Button>
         </header>
 
-        {error && <div className="error-banner">{error}</div>}
-
-        {/* ── Panel A: Provider Management ─────────────────────────── */}
-        <div className="settings-section">
-          <div className="settings-section-header">
-            <p className="settings-section-label">공급자 관리</p>
-            <button
-              type="button"
-              className="button secondary add-provider-btn"
-              onClick={() => setShowAddForm(!showAddForm)}
-              disabled={showAddForm}
-            >
-              + 공급자 추가
-            </button>
+        <Tabs defaultValue="models" className="contents">
+          <div className="settings-tabbar">
+            <TabsList>
+              <TabsTrigger value="models" data-testid="settings-tab-models">
+                모델
+              </TabsTrigger>
+              <TabsTrigger value="voice" data-testid="settings-tab-voice">
+                음성
+              </TabsTrigger>
+            </TabsList>
           </div>
 
-          {providerError && <div className="error-banner">{providerError}</div>}
+          {error && <div className="error-banner settings-alert">{error}</div>}
 
-          {showAddForm && (
-            <AddProviderForm
-              onSave={handleAddProvider}
-              onCancel={() => setShowAddForm(false)}
-            />
-          )}
-
-          {providers.length === 0 && !showAddForm && (
-            <div className="empty-small">등록된 공급자가 없습니다. 위 버튼을 눌러 추가하세요.</div>
-          )}
-
-          <div className="provider-mgmt-list">
-            {providers.map((provider) => {
-              const builtinInfo = BUILTIN_PROVIDER_MAP[provider.id];
-              // Map builtin providers to their OAuth keys correctly
-              let oauthProviderId: string | null = null;
-              if (provider.id === "00000000-0000-0000-0000-000000000001") oauthProviderId = "codex_oauth";
-              else if (provider.id === "00000000-0000-0000-0000-000000000002") oauthProviderId = "claude_oauth";
-              const oauthStatus = oauthProviderId ? oauthStatuses[oauthProviderId] : null;
-              const st = oauthStatus ? describeOAuthStatus(oauthStatus) : null;
-              const models = provider.models.length > 0 ? provider.models : (builtinInfo?.models ?? []);
-
-              return (
-                <div
-                  key={provider.id}
-                  className={`provider-mgmt-entry ${provider.is_builtin ? "builtin" : ""}`}
-                >
-                  <div className="entry-main">
-                    <div className="entry-heading">
-                      <span className="entry-name">
-                        {builtinInfo?.name ?? provider.name}
-                      </span>
-                      <span className={`type-badge type-${provider.provider_type}`}>
-                        {PROVIDER_TYPE_LABELS[provider.provider_type] ?? provider.provider_type}
-                      </span>
-                      {provider.is_builtin && <span className="builtin-badge">기본</span>}
-                    </div>
-                    {!provider.is_builtin && provider.base_url && (
-                      <div className="entry-detail">{provider.base_url}</div>
-                    )}
-                    {provider.api_key_masked && (
-                      <div className="entry-detail">
-                        키: <code>{provider.api_key_masked}</code>
-                      </div>
-                    )}
-                    {models.length > 0 && (
-                      <div className="entry-models">
-                        {models.map((m) => (
-                          <span key={m} className="model-chip">
-                            {m}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {st && (
-                      <div className={`provider-status ${st.tone}`}>
-                        {st.text}
-                      </div>
-                    )}
+          <div className="settings-body ds-scroll">
+            {/* ── Tab: 모델 ─────────────────────────────────────────── */}
+            <TabsContent value="models" className="settings-tab-panel">
+              {/* ── Panel A: Provider Management ───────────────────── */}
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div>
+                    <p className="settings-section-label">공급자 관리</p>
+                    <p className="settings-subtitle">
+                      회의록 생성에 사용할 LLM 공급자와 자격 증명을 관리합니다.
+                    </p>
                   </div>
-                  <div className="entry-actions">
-                    {!provider.is_builtin && (
-                      <button
-                        type="button"
-                        className="button secondary entry-delete"
-                        onClick={() => void handleDeleteProvider(provider.id)}
-                        title="삭제"
-                      >
-                        삭제
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ── Panel B: Model Assignment ───────────────────────────── */}
-        <div className="settings-section">
-          <p className="settings-section-label">모델 할당</p>
-          <p className="settings-subtitle">각 작업에 사용할 공급자와 모델을 선택하세요.</p>
-
-          {assignmentError && <div className="error-banner">{assignmentError}</div>}
-
-          {MODEL_PURPOSES.map(({ purpose, label, desc }) => {
-            const current = assignments[purpose];
-            const selectedProviderId = current?.provider_id ?? "";
-            const selectedProvider = providerOptions.find((o) => o.value === selectedProviderId);
-            const availableModels = selectedProvider?.models ?? [];
-
-            return (
-              <div key={purpose} className="model-assign-row">
-                <div className="assign-label">
-                  <strong>{label}</strong>
-                  <span>{desc}</span>
-                </div>
-                <div className="assign-controls">
-                  <select
-                    value={selectedProviderId}
-                    onChange={(e) => {
-                      const pid = e.target.value;
-                      const provider = providerOptions.find((o) => o.value === pid);
-                      const firstModel = provider?.models[0] ?? "";
-                      void handleUpdateAssignment(purpose, pid, firstModel);
-                    }}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAddForm(!showAddForm)}
+                    disabled={showAddForm}
                   >
-                    <option value="">-- 공급자 선택 --</option>
-                    {providerOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedProviderId && (
+                    + 공급자 추가
+                  </Button>
+                </div>
+
+                {providerError && <div className="error-banner">{providerError}</div>}
+
+                {showAddForm && (
+                  <AddProviderForm
+                    onSave={handleAddProvider}
+                    onCancel={() => setShowAddForm(false)}
+                  />
+                )}
+
+                {providers.length === 0 && !showAddForm && (
+                  <p className="empty-small">
+                    등록된 공급자가 없습니다. 위 버튼을 눌러 추가하세요.
+                  </p>
+                )}
+
+                {providers.length > 0 && (
+                  <div className="settings-rows">
+                    {providers.map((provider) => {
+                      const builtinInfo = BUILTIN_PROVIDER_MAP[provider.id];
+                      // Map builtin providers to their OAuth keys correctly
+                      let oauthProviderId: string | null = null;
+                      if (provider.id === "00000000-0000-0000-0000-000000000001") oauthProviderId = "codex_oauth";
+                      else if (provider.id === "00000000-0000-0000-0000-000000000002") oauthProviderId = "claude_oauth";
+                      const oauthStatus = oauthProviderId ? oauthStatuses[oauthProviderId] : null;
+                      const st = oauthStatus ? describeOAuthStatus(oauthStatus) : null;
+                      const models = provider.models.length > 0 ? provider.models : (builtinInfo?.models ?? []);
+
+                      return (
+                        <div key={provider.id} className="provider-row">
+                          <div className="entry-main">
+                            <div className="entry-heading">
+                              <span className="entry-name">
+                                {builtinInfo?.name ?? provider.name}
+                              </span>
+                              <span className="entry-type">
+                                {PROVIDER_TYPE_LABELS[provider.provider_type] ?? provider.provider_type}
+                                {provider.is_builtin && " · 기본"}
+                              </span>
+                            </div>
+                            {!provider.is_builtin && provider.base_url && (
+                              <div className="entry-detail" data-numeric>
+                                {provider.base_url}
+                              </div>
+                            )}
+                            {provider.api_key_masked && (
+                              <div className="entry-detail">
+                                키: <code data-numeric>{provider.api_key_masked}</code>
+                              </div>
+                            )}
+                            {models.length > 0 && (
+                              <div className="entry-models" data-numeric>
+                                {models.map((m) => (
+                                  <span key={m}>{m}</span>
+                                ))}
+                              </div>
+                            )}
+                            {st && <div className={`provider-status ${st.tone}`}>{st.text}</div>}
+                          </div>
+                          {!provider.is_builtin && (
+                            <div className="entry-actions">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:bg-destructive-soft hover:text-destructive"
+                                onClick={() => void handleDeleteProvider(provider.id)}
+                                title="삭제"
+                              >
+                                삭제
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* ── Panel B: Model Assignment ──────────────────────── */}
+              <section className="settings-section">
+                <p className="settings-section-label">모델 할당</p>
+                <p className="settings-subtitle">각 작업에 사용할 공급자와 모델을 선택하세요.</p>
+
+                {assignmentError && <div className="error-banner">{assignmentError}</div>}
+
+                <div className="settings-rows">
+                  {MODEL_PURPOSES.map(({ purpose, label, desc }) => {
+                    const current = assignments[purpose];
+                    const selectedProviderId = current?.provider_id ?? "";
+                    const selectedProvider = providerOptions.find((o) => o.value === selectedProviderId);
+                    const availableModels = selectedProvider?.models ?? [];
+
+                    return (
+                      <div key={purpose} className="settings-row">
+                        <div className="settings-row-label">
+                          {label}
+                          <span>{desc}</span>
+                        </div>
+                        <div className="settings-controls">
+                          <select
+                            className="settings-select"
+                            aria-label={`${label} 공급자`}
+                            value={selectedProviderId}
+                            onChange={(e) => {
+                              const pid = e.target.value;
+                              const provider = providerOptions.find((o) => o.value === pid);
+                              const firstModel = provider?.models[0] ?? "";
+                              void handleUpdateAssignment(purpose, pid, firstModel);
+                            }}
+                          >
+                            <option value="">-- 공급자 선택 --</option>
+                            {providerOptions.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                          {selectedProviderId && (
+                            <select
+                              className="settings-select"
+                              aria-label={`${label} 모델`}
+                              data-numeric
+                              value={current?.model_name ?? ""}
+                              onChange={(e) =>
+                                void handleUpdateAssignment(purpose, selectedProviderId, e.target.value)
+                              }
+                            >
+                              <option value="">-- 모델 선택 --</option>
+                              {availableModels.map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            </TabsContent>
+
+            {/* ── Tab: 음성 ─────────────────────────────────────────── */}
+            <TabsContent value="voice" className="settings-tab-panel">
+              <section className="settings-section">
+                <p className="settings-section-label">전사 엔진</p>
+                <p className="settings-subtitle">녹음을 텍스트로 변환할 엔진을 선택하세요.</p>
+
+                {voiceError && <div className="error-banner">{voiceError}</div>}
+
+                <div className="settings-rows">
+                  <label className="settings-row">
+                    <span className="settings-row-label">엔진</span>
                     <select
-                      value={current?.model_name ?? ""}
-                      onChange={(e) =>
-                        void handleUpdateAssignment(purpose, selectedProviderId, e.target.value)
-                      }
+                      className="settings-select"
+                      data-testid="stt-engine-select"
+                      value={sttEngine}
+                      onChange={(e) => setSttEngine(e.target.value as SttEngine)}
                     >
-                      <option value="">-- 모델 선택 --</option>
-                      {availableModels.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
+                      {STT_ENGINE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
                         </option>
                       ))}
                     </select>
-                  )}
+                  </label>
+
+                  <label className="settings-row">
+                    <span className="settings-row-label">
+                      서버 URL
+                      <span>자체 모델 서버의 WebSocket 주소</span>
+                    </span>
+                    <input
+                      className="settings-input"
+                      type="text"
+                      data-numeric
+                      data-testid="stt-server-url-input"
+                      value={sttServerUrl}
+                      onChange={(e) => setSttServerUrl(e.target.value)}
+                      placeholder="ws://192.168.1.189:9090"
+                    />
+                  </label>
                 </div>
-              </div>
-            );
-          })}
-        </div>
 
-        {/* ── Panel C: STT Server ──────────────────────────────────── */}
-        <div className="settings-section">
-          <p className="settings-section-label">전사(STT) 서버</p>
-          <p className="settings-subtitle">음성 인식 서버의 WebSocket 주소를 입력하세요.</p>
-          <div className="provider-mgmt-entry">
-            <div className="entry-main">
-              <div className="entry-detail">
-                <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11, fontWeight: 700 }}>
-                  서버 URL
-                  <input
-                    type="text"
-                    value={sttServerUrl}
-                    onChange={(e) => setSttServerUrl(e.target.value)}
-                    placeholder="ws://192.168.1.189:9090"
-                    style={{ width: "100%", height: 38, padding: "0 10px", fontSize: 12, borderRadius: 9, border: "1px solid hsl(var(--border))", background: "hsl(var(--surface))" }}
-                  />
-                </label>
-              </div>
-            </div>
+                <p className="settings-hint">
+                  {sttEngine === "elevenlabs"
+                    ? "ElevenLabs Scribe를 사용하려면 아래에 API 키를 등록해야 합니다."
+                    : "자체 모델 서버를 사용합니다. 위 서버 URL이 적용됩니다."}
+                </p>
+              </section>
+
+              <section className="settings-section">
+                <p className="settings-section-label">ElevenLabs API 키</p>
+                <p className="settings-subtitle">
+                  키는 로컬에 저장되며 등록 후에는 마스킹된 값만 표시됩니다.
+                </p>
+
+                <div className="settings-rows">
+                  <div className="settings-row">
+                    <label className="settings-row-label" htmlFor="elevenlabs-api-key">
+                      API 키
+                    </label>
+                    <div className="settings-controls">
+                      <input
+                        id="elevenlabs-api-key"
+                        className="settings-input"
+                        type="password"
+                        data-numeric
+                        data-testid="elevenlabs-api-key-input"
+                        value={elevenLabsKeyInput}
+                        onChange={(e) => setElevenLabsKeyInput(e.target.value)}
+                        placeholder={elevenLabsKeyMasked ?? "sk_…"}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => void handleSaveElevenLabsKey()}
+                        disabled={isSavingKey || !elevenLabsKeyInput.trim()}
+                      >
+                        {isSavingKey ? "저장 중..." : "저장"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="settings-hint">
+                  {elevenLabsKeyMasked ? (
+                    <>
+                      등록된 키: <code data-numeric>{elevenLabsKeyMasked}</code>
+                    </>
+                  ) : (
+                    "등록된 키가 없습니다."
+                  )}
+                </p>
+              </section>
+            </TabsContent>
           </div>
-        </div>
+        </Tabs>
 
-        {/* ── Save / Cancel ────────────────────────────────────────── */}
-        <div className="settings-actions">
-          <button type="button" className="button secondary" onClick={onClose} disabled={isSaving}>
+        {/* ── Save / Cancel ──────────────────────────────────────────── */}
+        <div className="settings-footer">
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={isSaving}>
             취소
-          </button>
-          <button
-            type="button"
-            className="button primary"
-            onClick={() => void handleSave()}
-            disabled={isSaving}
-          >
+          </Button>
+          <Button size="sm" onClick={() => void handleSave()} disabled={isSaving}>
             {isSaving ? "저장 중..." : "저장"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

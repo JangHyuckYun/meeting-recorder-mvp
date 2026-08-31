@@ -1,0 +1,424 @@
+/* History surface — archive list + recording detail.
+ * Direction per DESIGN.md §0: rows before cards, hairlines carry structure,
+ * numbers are mono/tabular, one blue accent (the primary action + the active
+ * row edge). Tokens: styles/global.css. */
+
+.history-screen {
+  display: grid;
+  grid-template-rows: var(--header-height) minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---- archive list --------------------------------------------------- */
+
+.history-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-topbar h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.history-count {
+  margin-right: auto;
+  padding-left: 12px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  border-left: 1px solid hsl(var(--border));
+}
+
+.history-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.history-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 6.5rem 12rem 4.5rem;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-row-head {
+  height: 28px;
+  color: hsl(var(--subtle-foreground));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: hsl(var(--surface-sunken));
+}
+
+.history-row-head .history-cell-duration {
+  text-align: right;
+}
+
+button.history-row {
+  height: 44px;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
+}
+
+button.history-row:hover:not(:disabled),
+button.history-row:focus-visible {
+  background: hsl(var(--accent));
+  box-shadow: inset 2px 0 0 0 hsl(var(--primary));
+}
+
+button.history-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.history-list .error-banner {
+  margin: 12px 16px;
+}
+
+.history-cell-title {
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-cell-date {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.history-cell-duration {
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  text-align: right;
+}
+
+/* Status reads as a dot plus a word — no pill, no second accent object. */
+.history-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.history-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background: currentColor;
+  border-radius: 999px;
+}
+
+.history-status[data-status="failed"] {
+  color: hsl(var(--destructive));
+}
+
+.history-status[data-status="transcribing"],
+.history-status[data-status="recording"] {
+  color: hsl(var(--warning));
+}
+
+.history-status[data-status="transcribed"],
+.history-status[data-status="minutes_ready"] {
+  color: hsl(var(--success));
+}
+
+/* ---- empty / loading ------------------------------------------------ */
+
+.history-empty {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+.history-empty h2 {
+  margin: 0;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.history-empty p,
+.history-loading {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.history-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+}
+
+.history-loading span {
+  width: 12px;
+  height: 12px;
+  border: 2px solid hsl(var(--border));
+  border-top-color: hsl(var(--primary));
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ---- detail: chrome -------------------------------------------------- */
+
+.history-detail-panel {
+  padding: 0;
+}
+
+.history-detail-bar {
+  display: flex;
+  height: var(--header-height);
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+
+.history-back:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+}
+
+.history-detail-head {
+  flex: none;
+  padding: 16px 20px 12px;
+}
+
+.history-detail-head h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.history-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.history-detail-panel .error-banner {
+  margin: 0 20px;
+}
+
+/* ---- detail: transcript toolbar + progress --------------------------- */
+
+.history-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-toolbar h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.history-toolbar-count {
+  margin-right: auto;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.history-progress {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-progress-bar {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  background: hsl(var(--border));
+  border: 0;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.history-progress-bar::-webkit-progress-bar {
+  background: hsl(var(--border));
+}
+
+.history-progress-bar::-webkit-progress-value {
+  background: hsl(var(--primary));
+  transition: width var(--motion-base) var(--ease-out);
+}
+
+.history-progress-text {
+  flex: none;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ---- detail: transcript rows ----------------------------------------- */
+
+.history-transcript {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.history-segment {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-segment-time {
+  color: hsl(var(--subtle-foreground));
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.history-segment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.history-speaker::before {
+  content: "";
+  width: 3px;
+  height: 11px;
+  background: hsl(var(--speaker-1));
+  border-radius: var(--radius-xs);
+}
+
+.history-speaker[data-speaker="1"]::before { background: hsl(var(--speaker-2)); }
+
+.history-speaker[data-speaker="2"]::before { background: hsl(var(--speaker-3)); }
+
+.history-speaker[data-speaker="3"]::before { background: hsl(var(--speaker-5)); }
+
+.history-segment-flag {
+  color: hsl(var(--state-partial));
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.history-segment p {
+  margin: 3px 0 0;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+/* ---- detail: side notes / empty copy ---------------------------------- */
+
+.history-note {
+  padding: 16px 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-note h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.history-note p {
+  margin: 4px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.history-note .history-note-action {
+  margin-top: 12px;
+}
+
+.minutes-view.history-minutes {
+  padding: 0;
+}
+
+.history-minutes-header {
+  display: flex;
+  height: var(--header-height);
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.history-minutes-header h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.history-minutes-header .history-minutes-eyebrow {
+  color: hsl(var(--subtle-foreground));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}

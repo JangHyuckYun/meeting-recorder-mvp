@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui";
 import { MinutesView } from "../components/MinutesView";
 import { errorMessage, formatDate, formatDuration, STATUS_LABELS } from "../formatters";
 import type { MinutesDraft, Recording, TranscriptSegment } from "../types";
@@ -18,8 +19,7 @@ type TranscriptionProgressEvent = {
 
 function EmptyHistory() {
   return (
-    <div className="empty-state">
-      <span className="empty-state-icon">◎</span>
+    <div className="history-empty">
       <h2>아직 저장된 회의가 없습니다</h2>
       <p>실시간 탭에서 첫 녹음을 시작하거나, 가져오기 탭에서 기존 녹음 파일을 가져오세요.</p>
     </div>
@@ -191,100 +191,102 @@ export function HistoryScreen() {
     })();
     return (
       <div className="history-detail-screen">
-        <section className="transcript-panel detail-panel">
-          <header className="panel-header detail-header">
-            <button type="button" className="back-button" onClick={() => setDetail(null)}>
+        <section className="transcript-panel history-detail-panel">
+          <div className="history-detail-bar">
+            <button type="button" className="history-back" onClick={() => setDetail(null)}>
               <span aria-hidden="true">←</span> 목록
             </button>
-            <div className="detail-heading-copy">
-              <p className="eyebrow">RECORDING DETAIL</p>
-              <h1>{detail.recording.title}</h1>
-              <p className="recording-meta">
-                {formatDate(detail.recording.created_at)} · {formatDuration(detail.recording.duration_ms)}
-              </p>
-            </div>
-            <span className={`recording-status ${detail.recording.status}`}>
+            <span className="history-status" data-status={detail.recording.status}>
               {STATUS_LABELS[detail.recording.status]}
             </span>
+          </div>
+
+          <header className="history-detail-head">
+            <h1>{detail.recording.title}</h1>
+            <p className="history-detail-meta">
+              <span data-numeric>{formatDate(detail.recording.created_at)}</span>
+              <span aria-hidden="true">·</span>
+              <span data-numeric>{formatDuration(detail.recording.duration_ms)}</span>
+            </p>
           </header>
 
-          {error && <div className="error-banner">요청을 처리하지 못했습니다: {error}</div>}
-
-          <div className="transcript-toolbar">
-            <div>
-              <h2>전사 내용</h2>
-              <span>{detail.segments.length}개 세그먼트</span>
+          {error && (
+            <div className="error-banner" role="alert">
+              요청을 처리하지 못했습니다: {error}
             </div>
+          )}
+
+          <div className="history-toolbar">
+            <h2>전사 내용</h2>
+            <span className="history-toolbar-count" data-numeric>
+              {detail.segments.length}개 세그먼트
+            </span>
             {canTranscribe && !isThisTranscribing && (
-              <button
-                type="button"
-                className="button primary"
-                onClick={transcribeRecording}
-              >
+              <Button size="sm" onClick={transcribeRecording}>
                 전사 시작
-              </button>
+              </Button>
             )}
             {isThisTranscribing && (
-              <button
-                type="button"
-                className="button secondary"
-                style={{ color: "hsl(var(--destructive))", borderColor: "hsl(var(--destructive) / 0.25)" }}
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/25 hover:bg-destructive-soft hover:text-destructive"
                 onClick={cancelTranscription}
               >
                 전사 취소
-              </button>
+              </Button>
             )}
             {canRetry && !isThisTranscribing && (
-              <button
-                type="button"
-                className="button primary"
-                onClick={retryTranscription}
-              >
+              <Button size="sm" onClick={retryTranscription}>
                 재시도
-              </button>
+              </Button>
             )}
             {detail.recording.status === "transcribing" && !isThisTranscribing && (
-              <button
-                type="button"
-                className="button secondary"
-                style={{ color: "hsl(var(--warning))", borderColor: "hsl(var(--warning) / 0.25)" }}
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-warning border-warning/25 hover:bg-warning-soft hover:text-warning"
                 onClick={retryTranscription}
               >
                 상태 초기화
-              </button>
+              </Button>
             )}
           </div>
 
           {isThisTranscribing && (
-            <div className="transcription-progress" aria-live="polite">
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
-              </div>
-              <span className="progress-text">
+            <div className="history-progress" aria-live="polite">
+              <progress
+                className="history-progress-bar"
+                aria-label="전사 진행률"
+                max={100}
+                value={thisProgress ? progressPercent : undefined}
+              />
+              <span className="history-progress-text" data-numeric>
                 {progressText ?? "전사 준비 중..."} {thisProgress ? `${Math.round(progressPercent)}%` : ""}
               </span>
             </div>
           )}
 
-          <div className="transcript-list">
+          <div className="history-transcript ds-scroll">
             {detail.segments.length > 0 ? (
               detail.segments.map((segment, index) => (
-                <article className="transcript-segment" key={segment.id}>
-                  <div className={`speaker-avatar color-${index % 4}`}>
-                    {segment.speaker_label.slice(-1)}
-                  </div>
-                  <div className="segment-content">
-                    <div className="segment-meta">
-                      <strong>{segment.speaker_label}</strong>
-                      <time>{formatDuration(segment.start_ms)}</time>
-                      {!segment.is_final && <span>처리 중</span>}
+                <article className="history-segment" key={segment.id}>
+                  <time className="history-segment-time" data-numeric>
+                    {formatDuration(segment.start_ms)}
+                  </time>
+                  <div>
+                    <div className="history-segment-meta">
+                      <span className="history-speaker" data-speaker={index % 4}>
+                        {segment.speaker_label}
+                      </span>
+                      {!segment.is_final && <span className="history-segment-flag">처리 중</span>}
                     </div>
                     <p>{segment.text}</p>
                   </div>
                 </article>
               ))
             ) : (
-              <div className="empty-transcript">
+              <div className="history-note">
                 <h3>아직 전사 내용이 없습니다</h3>
                 <p>전사 시작 버튼을 눌러 화자별 회의 내용을 생성하세요.</p>
               </div>
@@ -295,26 +297,24 @@ export function HistoryScreen() {
         {minutesDraft ? (
           <MinutesView minutes={minutesDraft} recordingId={detail.recording.id} onItemEdited={handleItemEdited} />
         ) : (
-          <section className="minutes-view" aria-label="회의록 초안">
-            <header className="panel-header">
-              <div>
-                <p className="eyebrow">AI MEETING NOTES</p>
-                <h2>회의록 초안</h2>
-              </div>
+          <section className="minutes-view history-minutes" aria-label="회의록 초안">
+            <header className="history-minutes-header">
+              <h2>회의록 초안</h2>
+              <span className="history-minutes-eyebrow">AI MEETING NOTES</span>
             </header>
-            <div className="empty-transcript">
+            <div className="history-note">
               {canGenerateMinutes ? (
                 <>
                   <h3>아직 회의록이 없습니다</h3>
                   <p>전사 내용을 바탕으로 결정 사항과 할 일을 생성하세요.</p>
-                  <button
-                    type="button"
-                    className="button primary"
+                  <Button
+                    size="sm"
+                    className="history-note-action"
                     disabled={isGeneratingMinutes}
                     onClick={generateMinutes}
                   >
                     {isGeneratingMinutes ? "회의록 생성 중..." : "회의록 생성"}
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <>
@@ -331,51 +331,61 @@ export function HistoryScreen() {
 
   return (
     <section className="history-screen">
-      <header className="history-header">
-        <div>
-          <p className="eyebrow">ARCHIVE</p>
-          <h1>회의 히스토리</h1>
-          <p>저장된 녹음과 전사 내용을 한곳에서 확인하세요.</p>
-        </div>
-        <button type="button" className="button secondary refresh-button" onClick={loadRecordings}>
+      <header className="history-topbar">
+        <h1>회의 히스토리</h1>
+        <span className="history-count" data-numeric>
+          {recordings.length}건
+        </span>
+        <Button variant="outline" size="sm" onClick={loadRecordings}>
           새로고침
-        </button>
+        </Button>
       </header>
 
-      {error && <div className="error-banner">목록을 불러오지 못했습니다: {error}</div>}
+      <div className="history-list ds-scroll">
+        {error && (
+          <div className="error-banner" role="alert">
+            목록을 불러오지 못했습니다: {error}
+          </div>
+        )}
 
-      {isLoading ? (
-        <div className="loading-state"><span />녹음 목록을 불러오는 중...</div>
-      ) : recordings.length === 0 ? (
-        <EmptyHistory />
-      ) : (
-        <div className="recording-grid">
-          {recordings.map((recording) => (
-            <button
-              type="button"
-              className="recording-card"
-              key={recording.id}
-              onClick={() => openRecording(recording.id)}
-              disabled={isDetailLoading}
-            >
-              <div className="card-topline">
-                <span className={`recording-status ${recording.status}`}>
+        {isLoading ? (
+          <p className="history-loading">
+            <span aria-hidden="true" />
+            녹음 목록을 불러오는 중...
+          </p>
+        ) : recordings.length === 0 ? (
+          error ? null : <EmptyHistory />
+        ) : (
+          <>
+            <div className="history-row history-row-head" aria-hidden="true">
+              <span>제목</span>
+              <span>상태</span>
+              <span>기록 시각</span>
+              <span className="history-cell-duration">길이</span>
+            </div>
+            {recordings.map((recording) => (
+              <button
+                type="button"
+                className="history-row"
+                key={recording.id}
+                onClick={() => openRecording(recording.id)}
+                disabled={isDetailLoading}
+              >
+                <span className="history-cell-title">{recording.title}</span>
+                <span className="history-status" data-status={recording.status}>
                   {STATUS_LABELS[recording.status]}
                 </span>
-                <span className="card-arrow">↗</span>
-              </div>
-              <div>
-                <h2>{recording.title}</h2>
-                <p>{formatDate(recording.created_at)}</p>
-              </div>
-              <div className="card-duration">
-                <span className="mini-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span>
-                {formatDuration(recording.duration_ms)}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
+                <span className="history-cell-date" data-numeric>
+                  {formatDate(recording.created_at)}
+                </span>
+                <span className="history-cell-duration" data-numeric>
+                  {formatDuration(recording.duration_ms)}
+                </span>
+              </button>
+            ))}
+          </>
+        )}
+      </div>
     </section>
   );
 }

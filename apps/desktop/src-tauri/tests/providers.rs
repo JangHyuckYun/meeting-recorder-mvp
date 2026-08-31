@@ -1,7 +1,7 @@
 //! Provider registry + model assignment contract: the providers and model_assignments tables
 //! back the new dual-panel settings UI.
 
-use desktop_lib::models::{ModelPurpose, ProviderInput, ProviderType};
+use desktop_lib::models::{ModelPurpose, ProviderInput};
 use desktop_lib::storage::Storage;
 
 /// Before any provider is added, the list should return built-in seed providers.
@@ -60,7 +60,7 @@ async fn add_and_list_user_provider_roundtrip() {
         .expect("added provider should appear in list");
 
     assert_eq!(added.name, "My OpenAI Key");
-    assert_eq!(added.provider_type, ProviderType::Openai);
+    assert_eq!(added.provider_type, "openai");
     assert_eq!(added.base_url, "https://api.openai.com/v1");
     // api_key should be masked when listed
     assert!(added.api_key_masked.starts_with("sk-proj-"), "key should be masked: {}", added.api_key_masked);

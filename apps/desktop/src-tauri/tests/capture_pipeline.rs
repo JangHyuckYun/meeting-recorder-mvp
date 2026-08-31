@@ -66,7 +66,7 @@ async fn real_test_audio_transcribes_with_speaker_labels() {
 
     let cfg = SttConfig::default();
     let recording_id = Uuid::new_v4();
-    let segments = stt::transcribe_wav_file(&cfg, recording_id, &wav, None)
+    let segments = stt::transcribe_wav_file(&cfg, recording_id, &wav, None, None)
         .await
         .expect("transcription should succeed against the live STT server");
 
@@ -105,7 +105,7 @@ async fn real_longer_test_audio_transcribes_with_speaker_labels() {
 
     let cfg = SttConfig::default();
     let recording_id = Uuid::new_v4();
-    let segments = stt::transcribe_wav_file(&cfg, recording_id, &wav, None)
+    let segments = stt::transcribe_wav_file(&cfg, recording_id, &wav, None, None)
         .await
         .expect("transcription should succeed against the live STT server");
 

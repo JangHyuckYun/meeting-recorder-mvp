@@ -197,10 +197,27 @@ impl Storage {
             .and_then(crate::models::LlmProvider::from_db_str)
             .unwrap_or_default();
         let stt_server_url = self.get_setting("stt_server_url").await?;
+        let stt_engine = self
+            .get_setting("stt_engine")
+            .await?
+            .as_deref()
+            .and_then(crate::models::SttEngine::from_db_str)
+            .unwrap_or_default();
+        let elevenlabs_api_key_masked = self
+            .elevenlabs_api_key()
+            .await?
+            .map(|key| mask_api_key(&key));
         Ok(crate::models::AppSettings {
             llm_provider,
             stt_server_url,
+            stt_engine,
+            elevenlabs_api_key_masked,
         })
+    }
+
+    /// Returns the raw ElevenLabs key for authenticated server-side requests.
+    pub async fn elevenlabs_api_key(&self) -> AppResult<Option<String>> {
+        self.get_setting("elevenlabs_api_key").await
     }
 
     // ------------------------------------------------------------------

@@ -1,0 +1,161 @@
+/* App shell — the visual anchor for the whole client (see DESIGN.md §0).
+ * Rail chrome sits on the sunken surface, the workspace is the white sheet;
+ * the seam between them is a hairline, never a shadow. Screens own their own
+ * headers, so the shell never prints a second page title.
+ * Tokens: styles/global.css. */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: hsl(var(--background));
+}
+
+/* ---- navigation rail ------------------------------------------------ */
+
+.sidebar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 8px;
+  background: hsl(var(--surface-sunken));
+  border-right: 1px solid hsl(var(--border));
+}
+
+/* Brand block shares the screen-header baseline, so the rail and the
+ * workspace header read as one line of chrome. */
+.brand {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  align-self: flex-start;
+  place-items: center;
+  margin: calc((var(--header-height) - 26px) / 2) 0;
+  margin-left: 6px;
+  color: hsl(var(--primary-foreground));
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: hsl(var(--primary));
+  border-radius: var(--radius-xs);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.nav-button {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 48px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0;
+  color: hsl(var(--muted-foreground));
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+
+.nav-button:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--surface) / 0.7);
+}
+
+.nav-button.active {
+  color: hsl(var(--foreground));
+  background: hsl(var(--surface));
+  box-shadow: inset 0 0 0 1px hsl(var(--border));
+}
+
+/* Active marker is a 2px rule on the rail edge — no filled blue pill. */
+.nav-button.active::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: -8px;
+  width: 2px;
+  background: hsl(var(--primary));
+}
+
+.nav-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nav-button.active svg {
+  stroke: hsl(var(--primary));
+}
+
+.nav-button span {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+/* ---- rail footer ---------------------------------------------------- */
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.profile-dot {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 700;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+}
+
+button.profile-dot {
+  padding: 0;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+
+button.profile-dot:hover {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border-strong));
+}
+
+/* ---- workspace ------------------------------------------------------ */
+
+.workspace {
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: hsl(var(--surface));
+}

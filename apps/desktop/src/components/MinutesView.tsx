@@ -1,5 +1,7 @@
 import { useState, type SyntheticEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Badge, Button } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { errorMessage } from "../formatters";
 import type { MinutesDraft, MinutesItem } from "../types";
 
@@ -55,7 +57,11 @@ interface EditTarget {
 }
 
 function EvidenceBadge({ item }: { item: MinutesItem }) {
-  return <span className="evidence-badge">근거 {item.evidence_segment_ids.length}개</span>;
+  return (
+    <span className="evidence-badge">
+      근거 <span data-numeric>{item.evidence_segment_ids.length}</span>
+    </span>
+  );
 }
 
 export function MinutesView({ minutes = MOCK_MINUTES, compact = false, recordingId, onItemEdited }: MinutesViewProps) {
@@ -116,59 +122,60 @@ export function MinutesView({ minutes = MOCK_MINUTES, compact = false, recording
         placeholder="예: 더 간결하고 격식 있게 다듬어줘"
         rows={3}
       />
-      {editError && <p className="error-banner">수정 요청 실패: {editError}</p>}
+      {editError && (
+        <p className="error-banner" role="alert">
+          수정 요청 실패: {editError}
+        </p>
+      )}
       <div className="instruction-actions">
-        <button
-          type="button"
-          className="button secondary"
-          onClick={() => setEditing(null)}
-          disabled={isSubmitting}
-        >
+        <Button variant="outline" size="sm" onClick={() => setEditing(null)} disabled={isSubmitting}>
           취소
-        </button>
-        <button type="submit" className="button primary" disabled={!instruction.trim() || isSubmitting}>
+        </Button>
+        <Button type="submit" size="sm" disabled={!instruction.trim() || isSubmitting}>
           {isSubmitting ? "수정 중..." : "수정 요청"}
-        </button>
+        </Button>
       </div>
     </form>
   ) : null;
 
   return (
-    <section className={`minutes-view ${compact ? "compact" : ""}`} aria-label="회의록 초안">
-      <header className="panel-header">
-        <div>
-          <p className="eyebrow">AI MEETING NOTES</p>
+    <section className={cn("minutes-view", compact && "compact")} aria-label="회의록 초안">
+      <header className="minutes-header">
+        <div className="minutes-heading">
           <h2>회의록 초안</h2>
+          <span className="minutes-heading-meta">
+            결정 <span data-numeric>{minutes.decisions.length}</span> · 할 일{" "}
+            <span data-numeric>{minutes.action_items.length}</span>
+          </span>
         </div>
-        <span className="draft-badge">{recordingId ? "AI 생성" : "예시 데이터"}</span>
+        <Badge variant="outline" size="sm">
+          {recordingId ? "AI 생성" : "예시 데이터"}
+        </Badge>
       </header>
 
       <div className="minutes-scroll">
         <section className="minutes-section">
-          <div className="minutes-section-heading">
-            <div>
-              <h3>요약</h3>
-            </div>
-          </div>
-          <p className="summary-card">{minutes.summary}</p>
+          <h3 className="minutes-section-heading">요약</h3>
+          <p className="minutes-summary">{minutes.summary}</p>
         </section>
 
         <section className="minutes-section">
-          <div className="minutes-section-heading">
-            <div>
-              <h3>결정 사항</h3>
-              <span>{minutes.decisions.length}</span>
-            </div>
-          </div>
-          <div className="minutes-card-list">
-            {minutes.decisions.map((item) => (
+          <h3 className="minutes-section-heading">
+            결정 사항 <span data-numeric>{minutes.decisions.length}</span>
+          </h3>
+          <div className="minutes-list">
+            {minutes.decisions.map((item, index) => (
               <button
-                className="minutes-item decision editable-card"
+                className={cn("minutes-item", editing?.item.id === item.id && "is-editing")}
                 type="button"
                 key={item.id}
+                aria-expanded={editing?.item.id === item.id}
+                aria-controls={editing?.item.id === item.id ? "minutes-instruction" : undefined}
                 onClick={() => startEditing("decisions", item)}
               >
-                <span className="item-marker">✓</span>
+                <span className="item-marker" data-numeric aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
                 <span className="item-copy">{item.text}</span>
                 <EvidenceBadge item={item} />
               </button>
@@ -178,21 +185,22 @@ export function MinutesView({ minutes = MOCK_MINUTES, compact = false, recording
         </section>
 
         <section className="minutes-section">
-          <div className="minutes-section-heading">
-            <div>
-              <h3>할 일</h3>
-              <span>{minutes.action_items.length}</span>
-            </div>
-          </div>
-          <div className="minutes-card-list">
+          <h3 className="minutes-section-heading">
+            할 일 <span data-numeric>{minutes.action_items.length}</span>
+          </h3>
+          <div className="minutes-list">
             {minutes.action_items.map((item, index) => (
               <button
-                className="minutes-item action editable-card"
+                className={cn("minutes-item", editing?.item.id === item.id && "is-editing")}
                 type="button"
                 key={item.id}
+                aria-expanded={editing?.item.id === item.id}
+                aria-controls={editing?.item.id === item.id ? "minutes-instruction" : undefined}
                 onClick={() => startEditing("action_items", item)}
               >
-                <span className="item-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="item-marker" data-numeric aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
                 <span className="item-copy">{item.text}</span>
                 <EvidenceBadge item={item} />
               </button>

@@ -1,0 +1,229 @@
+/* Minutes draft panel. Matches the shell register (DESIGN.md §0): a header on
+ * the shared --header-height baseline, hairline seams between sections,
+ * left-flush rows instead of cards, mono figures for counts, one blue accent
+ * reserved for the row being edited and the primary action.
+ * Tokens: styles/global.css. */
+
+.minutes-view {
+  display: flex;
+  flex-direction: column;
+  background: hsl(var(--surface));
+}
+
+/* ---- panel header (shares the rail's brand baseline) ---------------- */
+
+.minutes-header {
+  display: flex;
+  height: var(--header-height);
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.minutes-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.minutes-heading h2 {
+  margin: 0;
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minutes-heading-meta {
+  flex: none;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.minutes-heading-meta::before {
+  content: "·";
+  margin-right: 8px;
+  color: hsl(var(--subtle-foreground));
+}
+
+/* ---- scroll body ---------------------------------------------------- */
+
+.minutes-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border-strong)) transparent;
+}
+
+.minutes-section {
+  padding: 12px 20px 16px;
+}
+
+.minutes-section + .minutes-section {
+  border-top: 1px solid hsl(var(--border));
+}
+
+.minutes-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+}
+
+.minutes-section-heading span {
+  color: hsl(var(--subtle-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.minutes-summary {
+  margin: 0;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* ---- item rows ------------------------------------------------------ */
+
+.minutes-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -8px;
+}
+
+.minutes-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.minutes-item + .minutes-item {
+  box-shadow: inset 0 1px 0 0 hsl(var(--border));
+}
+
+.minutes-item:hover {
+  background: hsl(var(--accent));
+}
+
+.minutes-item.is-editing {
+  background: hsl(var(--primary-soft));
+}
+
+/* Selection is a fill plus a 2px accent edge — never a floating card. */
+.minutes-item.is-editing::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 2px;
+  background: hsl(var(--primary));
+}
+
+.item-marker {
+  flex: none;
+  min-width: 18px;
+  color: hsl(var(--subtle-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.minutes-item.is-editing .item-marker {
+  color: hsl(var(--primary));
+}
+
+.item-copy {
+  min-width: 0;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.minutes-item .evidence-badge {
+  flex: none;
+  padding: 1px 6px;
+  color: hsl(var(--subtle-foreground));
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-xs);
+}
+
+/* ---- edit instruction editor ---------------------------------------- */
+
+.instruction-editor {
+  margin-top: 10px;
+  padding: 12px;
+  background: hsl(var(--surface-sunken));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+.instruction-editor label {
+  display: block;
+  margin-bottom: 6px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.instruction-editor textarea {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  resize: vertical;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  line-height: 1.55;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+}
+
+.instruction-editor .error-banner {
+  margin-top: 8px;
+}
+
+.instruction-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ---- compact (live screen side panel) ------------------------------- */
+
+.minutes-view.compact .minutes-header {
+  padding: 0 16px;
+}
+
+.minutes-view.compact .minutes-section {
+  padding: 10px 16px 14px;
+}
