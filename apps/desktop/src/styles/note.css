@@ -1,0 +1,212 @@
+/* S4 — Note detail: header, doc/conversation/script body, speaker + jump
+ * sidebar. Reuses history-* row/segment classes from history.css and the
+ * shared design tokens in global.css. */
+
+.note-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.note-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: var(--header-height);
+  padding: 0 20px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.note-header-title {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.note-eyebrow {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.note-header-title h1 {
+  margin: 0;
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-header-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.note-body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+  padding: 16px 20px;
+  overflow: hidden;
+}
+
+.note-main {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.note-main [role="tabpanel"] {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.note-doc-meta {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin: 0 0 10px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.note-main [role="tabpanel"] .minutes-view {
+  min-height: 0;
+  flex: 1;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+.note-conversation,
+.note-script {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+.note-script {
+  padding: 16px 20px;
+}
+
+.note-script p {
+  margin: 0 0 10px;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.note-script p strong {
+  margin-right: 6px;
+  color: hsl(var(--primary-soft-foreground));
+}
+
+/* ---- sidebar ---------------------------------------------------------- */
+
+.note-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.note-card {
+  padding: 12px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+.note-card-title {
+  margin: 0 0 10px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.note-card-empty {
+  margin: 0;
+  color: hsl(var(--subtle-foreground));
+  font-size: 12px;
+}
+
+.note-speaker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.note-speaker-row:last-child {
+  border-bottom: 0;
+}
+
+.note-speaker-edit {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.note-speaker-edit:hover {
+  color: hsl(var(--primary));
+}
+
+.note-speaker-input {
+  width: 110px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--ring));
+  border-radius: var(--radius-xs);
+}
+
+.note-jump-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  cursor: pointer;
+}
+
+.note-jump-row:last-child {
+  border-bottom: 0;
+}
+
+.note-jump-row span[aria-hidden] {
+  color: hsl(var(--primary));
+}
+
+.note-jump-row:hover {
+  color: hsl(var(--primary));
+}
