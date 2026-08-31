@@ -2,6 +2,7 @@ pub mod asr;
 pub mod audio;
 mod commands;
 pub mod error;
+pub mod export;
 pub mod minutes;
 pub mod models;
 pub mod storage;
@@ -62,6 +63,7 @@ pub fn run() {
             commands::create_folder,
             commands::delete_folder,
             commands::assign_recording_folder,
+            commands::export_transcript,
             commands::get_speaker_names,
             commands::set_speaker_name,
             commands::get_glossary,

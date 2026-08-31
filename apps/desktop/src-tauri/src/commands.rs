@@ -532,6 +532,46 @@ pub async fn assign_recording_folder(
         .await
 }
 
+/// Writes the recording's transcript to the user's Downloads directory in one of
+/// "srt" | "vtt" | "md" | "txt" and returns the absolute path written.
+#[tauri::command]
+pub async fn export_transcript(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    recording_id: String,
+    format: String,
+) -> AppResult<String> {
+    let uuid = Uuid::parse_str(&recording_id)
+        .map_err(|e| AppError::InvalidState(format!("bad recording id: {e}")))?;
+    let format = crate::export::ExportFormat::from_str(&format)?;
+    let rec = state
+        .storage
+        .get_recording(uuid)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("recording {recording_id} not found")))?;
+    let segments = state.storage.list_segments(uuid).await?;
+    if segments.is_empty() {
+        return Err(AppError::InvalidState(format!(
+            "recording {recording_id} has no transcript to export"
+        )));
+    }
+    let names = state.storage.get_speaker_names(uuid).await?;
+    let contents = crate::export::render(&rec.title, &segments, &names, format);
+
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| AppError::InvalidState(format!("no downloads dir: {e}")))?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(crate::export::safe_filename(
+        &rec.title,
+        &uuid.to_string()[..8],
+        format,
+    ));
+    std::fs::write(&path, contents)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// Per-recording speaker display names, keyed by diarization label ("화자 1" → "김민지").
 /// Empty when the user has never renamed anyone.
 #[tauri::command]
