@@ -14,16 +14,21 @@ pub struct ElevenLabsConfig {
     pub language_code: Option<String>,
     pub num_speakers: Option<u32>,
     pub diarize: bool,
+    /// Domain glossary biasing transcription (persisted app-wide, see `Storage::get_glossary`).
+    /// Sent as the `keyterms` multipart field; omitted entirely when empty.
+    pub keyterms: Vec<String>,
 }
 
 impl Default for ElevenLabsConfig {
     fn default() -> Self {
         Self {
             api_key: String::new(),
-            model_id: "scribe_v1".to_string(),
+            // scribe_v1 was removed from the ElevenLabs API on 2026-07-09.
+            model_id: "scribe_v2".to_string(),
             language_code: Some("ko".to_string()),
             num_speakers: None,
             diarize: true,
+            keyterms: Vec::new(),
         }
     }
 }
@@ -115,26 +120,47 @@ pub fn segments_from_response(recording_id: Uuid, body: &str) -> AppResult<Vec<T
     Ok(segments)
 }
 
+/// The non-file multipart fields of a batch transcription request. Split out from
+/// [`build_request`] so tests can assert the wire contract without a network call
+/// (a built reqwest multipart body is an opaque stream).
+pub fn text_fields(cfg: &ElevenLabsConfig) -> Vec<(&'static str, String)> {
+    let mut fields = vec![
+        ("model_id", cfg.model_id.clone()),
+        ("diarize", cfg.diarize.to_string()),
+        ("timestamps_granularity", "word".to_string()),
+    ];
+    if let Some(num_speakers) = cfg.num_speakers {
+        fields.push(("num_speakers", num_speakers.to_string()));
+    }
+    if let Some(language_code) = &cfg.language_code {
+        fields.push(("language_code", language_code.clone()));
+    }
+    let keyterms: Vec<&String> = cfg
+        .keyterms
+        .iter()
+        .filter(|term| !term.trim().is_empty())
+        .collect();
+    if !keyterms.is_empty() {
+        fields.push((
+            "keyterms",
+            serde_json::to_string(&keyterms).unwrap_or_else(|_| "[]".to_string()),
+        ));
+    }
+    fields
+}
+
 pub fn build_request(
     client: &reqwest::Client,
     cfg: &ElevenLabsConfig,
     file_bytes: Vec<u8>,
     filename: &str,
 ) -> reqwest::RequestBuilder {
-    let mut form = Form::new()
-        .text("model_id", cfg.model_id.clone())
-        .part(
-            "file",
-            Part::bytes(file_bytes).file_name(filename.to_string()),
-        )
-        .text("diarize", cfg.diarize.to_string())
-        .text("timestamps_granularity", "word");
-
-    if let Some(num_speakers) = cfg.num_speakers {
-        form = form.text("num_speakers", num_speakers.to_string());
-    }
-    if let Some(language_code) = &cfg.language_code {
-        form = form.text("language_code", language_code.clone());
+    let mut form = Form::new().part(
+        "file",
+        Part::bytes(file_bytes).file_name(filename.to_string()),
+    );
+    for (name, value) in text_fields(cfg) {
+        form = form.text(name, value);
     }
 
     client
