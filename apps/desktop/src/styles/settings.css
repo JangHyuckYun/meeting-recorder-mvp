@@ -4,32 +4,21 @@
  * All surface stylesheets are imported together by App.tsx, so the cascade stays
  * global; the split is organizational so each surface owns its own file. */
 
-/* ---- shell: scrim, panel, chrome ------------------------------------ */
+/* ---- shell: full-page surface (S8 mounts this as a route, not a dialog) */
 
 .settings-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: hsl(var(--foreground) / 0.45);
-  animation: settings-fade var(--motion-base) var(--ease-out);
+  height: 100%;
+  overflow: hidden;
+  background: hsl(var(--surface));
 }
 
 .settings-panel {
   display: flex;
-  width: 100%;
-  max-width: 42rem;
-  max-height: min(88vh, 46rem);
+  height: 100%;
   flex-direction: column;
   overflow: hidden;
   background: hsl(var(--surface));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-overlay);
   outline: none;
-  animation: settings-rise var(--motion-slow) var(--ease-out);
 }
 
 /* Header sits on the shared top-chrome baseline, like every screen header. */
@@ -62,14 +51,25 @@
   line-height: 1.2;
 }
 
-.settings-tabbar {
+/* Body is a rail + content split, like the S8 mockup. */
+.settings-shell {
   display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-rail {
   flex: none;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  width: 11rem;
+  padding: 8px;
   background: hsl(var(--surface-sunken));
-  border-bottom: 1px solid hsl(var(--border));
+  border-right: 1px solid hsl(var(--border));
+}
+
+.settings-rail-trigger {
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
 }
 
 /* Flush alert strip: the panel already has its own seams, so the banner
@@ -83,6 +83,7 @@
 
 .settings-body {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
 }
@@ -364,4 +365,107 @@
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid hsl(var(--border));
+}
+
+/* ---- engine picker (STT) ---------------------------------------------- */
+
+.engine-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  text-align: left;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+
+.engine-option:last-child {
+  margin-bottom: 0;
+}
+
+.engine-option[aria-pressed="true"] {
+  border-color: hsl(var(--primary));
+  box-shadow: inset 0 0 0 1px hsl(var(--primary));
+}
+
+.engine-option-dot {
+  flex: none;
+  margin-top: 1px;
+  color: hsl(var(--slate-300));
+  font-size: 15px;
+}
+
+.engine-option[aria-pressed="true"] .engine-option-dot {
+  color: hsl(var(--primary));
+}
+
+.engine-option-body {
+  min-width: 0;
+}
+
+.engine-option-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.engine-option-desc {
+  margin-top: 3px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.engine-option-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* ---- glossary chips ---------------------------------------------------- */
+
+.glossary-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.glossary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  background: hsl(var(--muted));
+  border: 0;
+  border-radius: 9999px;
+}
+
+.glossary-chip button {
+  color: hsl(var(--subtle-foreground));
+  line-height: 1;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.glossary-chip button:hover {
+  color: hsl(var(--destructive));
+}
+
+.glossary-add-input {
+  height: 26px;
+  padding: 0 4px;
+  font-size: 12px;
+  background: none;
+  border: 0;
+  outline: none;
 }

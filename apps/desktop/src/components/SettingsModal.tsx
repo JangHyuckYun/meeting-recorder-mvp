@@ -11,6 +11,7 @@ import type {
   ProviderInput,
   SttEngine,
 } from "../types";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
@@ -53,9 +54,27 @@ const PROVIDER_TYPE_OPTIONS = [
   { value: "openai_compatible", label: "OpenAI 호환 (vLLM, Ollama 등)" },
 ];
 
-const STT_ENGINE_OPTIONS: { value: SttEngine; label: string }[] = [
-  { value: "self_hosted", label: "자체 모델 서버" },
-  { value: "elevenlabs", label: "ElevenLabs (Scribe)" },
+const STT_ENGINE_OPTIONS: {
+  value: SttEngine;
+  label: string;
+  role: string;
+  desc: string;
+  tags: string[];
+}[] = [
+  {
+    value: "elevenlabs",
+    label: "ElevenLabs Scribe",
+    role: "기본",
+    desc: "v2 Realtime 라이브 캡션 + v2 배치 화자분리",
+    tags: ["클라우드", "다국어", "keyterm prompting"],
+  },
+  {
+    value: "self_hosted",
+    label: "자체 모델 서버",
+    role: "폴백",
+    desc: "자체 GPU 스택 · 로컬 서버에 연결",
+    tags: ["오프라인", "보안망", "원가통제"],
+  },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -212,6 +231,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [isSavingKey, setIsSavingKey] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
 
+  // Glossary / keyterms
+  const [glossaryTerms, setGlossaryTerms] = useState<string[]>([]);
+  const [glossaryDraft, setGlossaryDraft] = useState("");
+  const [glossaryError, setGlossaryError] = useState<string | null>(null);
+
   // General
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -233,6 +257,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setAssignmentError(null);
     setVoiceError(null);
     setElevenLabsKeyInput("");
+    setGlossaryError(null);
+
+    appClient
+      .getGlossary()
+      .then(setGlossaryTerms)
+      .catch((e) => setGlossaryError(errorMessage(e)));
 
     const load = async () => {
       try {
@@ -351,6 +381,30 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   };
 
+  const persistGlossary = async (terms: string[]) => {
+    setGlossaryError(null);
+    try {
+      await appClient.setGlossary(terms);
+      setGlossaryTerms(terms);
+    } catch (e) {
+      setGlossaryError(errorMessage(e));
+    }
+  };
+
+  const handleAddGlossaryTerm = () => {
+    const term = glossaryDraft.trim();
+    if (!term || glossaryTerms.includes(term)) {
+      setGlossaryDraft("");
+      return;
+    }
+    setGlossaryDraft("");
+    void persistGlossary([...glossaryTerms, term]);
+  };
+
+  const handleRemoveGlossaryTerm = (term: string) => {
+    void persistGlossary(glossaryTerms.filter((t) => t !== term));
+  };
+
   const handleSave = () => {
     setIsSaving(true);
     void (async () => {
@@ -385,16 +439,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // ── Render ───────────────────────────────────────────────────────────
 
   return (
-    <div
-      className="settings-overlay"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <div className="settings-overlay">
       <div
         className="settings-panel"
-        role="dialog"
-        aria-modal="true"
+        role="region"
         aria-label="설정"
         tabIndex={-1}
         ref={dialogRef}
@@ -402,7 +450,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         <header className="settings-header">
           <div>
             <p className="settings-eyebrow">SETTINGS</p>
-            <h2>환경 설정</h2>
+            <h2>설정</h2>
           </div>
           <Button
             variant="ghost"
@@ -415,19 +463,32 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           </Button>
         </header>
 
-        <Tabs defaultValue="models" className="contents">
-          <div className="settings-tabbar">
-            <TabsList>
-              <TabsTrigger value="models" data-testid="settings-tab-models">
-                모델
-              </TabsTrigger>
-              <TabsTrigger value="voice" data-testid="settings-tab-voice">
-                음성
-              </TabsTrigger>
-            </TabsList>
-          </div>
+        {error && <div className="error-banner settings-alert">{error}</div>}
 
-          {error && <div className="error-banner settings-alert">{error}</div>}
+        <Tabs defaultValue="voice" className="settings-shell">
+          <TabsList className="settings-rail flex-col items-stretch justify-start gap-1 rounded-none bg-transparent p-2 h-auto w-full">
+            <TabsTrigger
+              value="voice"
+              data-testid="settings-tab-voice"
+              className="settings-rail-trigger"
+            >
+              STT 엔진
+            </TabsTrigger>
+            <TabsTrigger
+              value="glossary"
+              data-testid="settings-tab-glossary"
+              className="settings-rail-trigger"
+            >
+              단어장
+            </TabsTrigger>
+            <TabsTrigger
+              value="models"
+              data-testid="settings-tab-models"
+              className="settings-rail-trigger"
+            >
+              회의록 모델
+            </TabsTrigger>
+          </TabsList>
 
           <div className="settings-body ds-scroll">
             {/* ── Tab: 모델 ─────────────────────────────────────────── */}
@@ -594,6 +655,47 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               </section>
             </TabsContent>
 
+            {/* ── Tab: 단어장 ───────────────────────────────────────── */}
+            <TabsContent value="glossary" className="settings-tab-panel">
+              <section className="settings-section">
+                <p className="settings-section-label">개인 단어장</p>
+                <p className="settings-subtitle">
+                  고유명사·전문 용어를 등록하면 음성 인식 정확도가 올라갑니다.
+                </p>
+
+                {glossaryError && <div className="error-banner">{glossaryError}</div>}
+
+                <div className="glossary-chips">
+                  {glossaryTerms.map((term) => (
+                    <span key={term} className="glossary-chip">
+                      {term}
+                      <button
+                        type="button"
+                        aria-label={`${term} 삭제`}
+                        onClick={() => handleRemoveGlossaryTerm(term)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    className="glossary-add-input"
+                    value={glossaryDraft}
+                    onChange={(e) => setGlossaryDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddGlossaryTerm();
+                      }
+                    }}
+                    onBlur={handleAddGlossaryTerm}
+                    placeholder="+ 단어 추가"
+                    aria-label="단어 추가"
+                  />
+                </div>
+              </section>
+            </TabsContent>
+
             {/* ── Tab: 음성 ─────────────────────────────────────────── */}
             <TabsContent value="voice" className="settings-tab-panel">
               <section className="settings-section">
@@ -602,22 +704,33 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
                 {voiceError && <div className="error-banner">{voiceError}</div>}
 
-                <div className="settings-rows">
-                  <label className="settings-row">
-                    <span className="settings-row-label">엔진</span>
-                    <select
-                      className="settings-select"
-                      data-testid="stt-engine-select"
-                      value={sttEngine}
-                      onChange={(e) => setSttEngine(e.target.value as SttEngine)}
+                <div className="settings-rows" data-testid="stt-engine-select">
+                  {STT_ENGINE_OPTIONS.map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      className="engine-option"
+                      aria-pressed={sttEngine === o.value}
+                      onClick={() => setSttEngine(o.value)}
                     >
-                      {STT_ENGINE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      <span className="engine-option-dot" aria-hidden="true">
+                        {sttEngine === o.value ? "◉" : "○"}
+                      </span>
+                      <span className="engine-option-body">
+                        <span className="engine-option-name">
+                          {o.label} <Badge variant={o.role === "기본" ? "primary" : "neutral"}>{o.role}</Badge>
+                        </span>
+                        <span className="engine-option-desc">{o.desc}</span>
+                        <span className="engine-option-tags">
+                          {o.tags.map((tag) => (
+                            <Badge key={tag} variant="outline" size="sm">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
 
                   <label className="settings-row">
                     <span className="settings-row-label">
