@@ -143,6 +143,117 @@ button.history-row:disabled {
   color: hsl(var(--success));
 }
 
+/* ---- S1 home: search + folder filters -------------------------------- */
+
+.home-filters {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.home-search {
+  width: 260px;
+  height: 30px;
+  padding: 0 10px;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-sm);
+}
+
+.home-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-chip {
+  height: 24px;
+  padding: 0 10px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+  background: hsl(var(--surface-sunken));
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.home-chip[data-active="true"] {
+  color: hsl(var(--primary-soft-foreground));
+  background: hsl(var(--primary-soft));
+}
+
+.home-chip-add {
+  color: hsl(var(--subtle-foreground));
+  background: transparent;
+  border: 1px dashed hsl(var(--border-strong));
+}
+
+.home-new-folder-input {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-sm);
+}
+
+/* ---- S1 home: row actions --------------------------------------------- */
+
+.history-row.home-row {
+  grid-template-columns: minmax(0, 1fr) 6.5rem 12rem 4.5rem 10.5rem;
+}
+
+.home-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.home-folder-select {
+  height: 24px;
+  max-width: 6.5rem;
+  padding: 0 4px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-xs);
+}
+
+.home-delete-btn {
+  height: 24px;
+  padding: 0 8px;
+  color: hsl(var(--destructive));
+  font-size: 11px;
+  font-weight: 700;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.home-delete-btn:hover {
+  background: hsl(var(--destructive-soft));
+  border-color: hsl(var(--destructive) / 0.25);
+}
+
+div.history-row.home-row {
+  cursor: pointer;
+}
+
+div.history-row.home-row:hover {
+  background: hsl(var(--accent));
+  box-shadow: inset 2px 0 0 0 hsl(var(--primary));
+}
+
 /* ---- empty / loading ------------------------------------------------ */
 
 .history-empty {

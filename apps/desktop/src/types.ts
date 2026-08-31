@@ -13,6 +13,7 @@ export interface Recording {
   duration_ms: number | null;
   status: RecordingStatus;
   created_at: string;
+  folder_id: string | null;
 }
 
 export interface TranscriptSegment {
