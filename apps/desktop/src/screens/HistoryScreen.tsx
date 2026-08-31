@@ -19,7 +19,14 @@ function EmptyHistory() {
   );
 }
 
-export function HistoryScreen() {
+interface HistoryScreenProps {
+  /** When set, opens this recording's detail on mount (used by NoteScreen/s4). */
+  initialRecordingId?: string;
+  /** When set, a list row navigates via this instead of opening detail inline (used by HomeScreen/s1). */
+  onOpenRecording?: (id: string) => void;
+}
+
+export function HistoryScreen({ initialRecordingId, onOpenRecording }: HistoryScreenProps = {}) {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [detail, setDetail] = useState<RecordingDetail | null>(null);
   const [minutesDraft, setMinutesDraft] = useState<MinutesDraft | null>(null);
@@ -62,6 +69,12 @@ export function HistoryScreen() {
       setIsDetailLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Mount-only: open whatever recording the route was given, once.
+    if (initialRecordingId) void openRecording(initialRecordingId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRecordingId]);
 
   const transcribeRecording = async () => {
     if (!detail) return;
@@ -348,7 +361,9 @@ export function HistoryScreen() {
                 type="button"
                 className="history-row"
                 key={recording.id}
-                onClick={() => openRecording(recording.id)}
+                onClick={() =>
+                  onOpenRecording ? onOpenRecording(recording.id) : openRecording(recording.id)
+                }
                 disabled={isDetailLoading}
               >
                 <span className="history-cell-title">{recording.title}</span>

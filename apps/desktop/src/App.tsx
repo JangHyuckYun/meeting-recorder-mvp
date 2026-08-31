@@ -12,9 +12,11 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { SettingsModal } from "./components/SettingsModal";
 import { AskScreen } from "./screens/AskScreen";
 import { ExportScreen } from "./screens/ExportScreen";
-import { HistoryScreen } from "./screens/HistoryScreen";
+import { HomeScreen } from "./screens/HomeScreen";
 import { ImportScreen } from "./screens/ImportScreen";
 import { LiveRecordingScreen } from "./screens/LiveRecordingScreen";
+import { NoteScreen } from "./screens/NoteScreen";
+import { PrepareScreen } from "./screens/PrepareScreen";
 import { ShareScreen } from "./screens/ShareScreen";
 import { TemplatesScreen } from "./screens/TemplatesScreen";
 import type { Route } from "./routes";
@@ -25,36 +27,43 @@ interface AppProps {
 }
 
 function renderScreen(route: Route, navigate: (route: Route) => void) {
-  switch (route) {
+  switch (route.id) {
     case "s1": // Home — notes list
-      return <HistoryScreen />;
+      return <HomeScreen onOpenNote={(recordingId) => navigate({ id: "s4", recordingId })} />;
     case "s2": // Prepare recording
-      return <LiveRecordingScreen />;
+      return <PrepareScreen onStart={() => navigate({ id: "s3" })} />;
     case "s3": // Live recording
       return <LiveRecordingScreen />;
-    case "s4": // Note detail (reuses HistoryScreen's own list/detail toggle)
-      return <HistoryScreen />;
+    case "s4": // Note detail
+      return (
+        <NoteScreen
+          recordingId={route.recordingId}
+          onExport={(recordingId) => navigate({ id: "s7", recordingId })}
+          onAsk={(recordingId) => navigate({ id: "s9", recordingId })}
+          onShare={(recordingId) => navigate({ id: "s10", recordingId })}
+        />
+      );
     case "s5": // Templates
       return <TemplatesScreen />;
     case "s6": // Import
       return <ImportScreen />;
     case "s7": // Export
-      return <ExportScreen />;
+      return <ExportScreen recordingId={route.recordingId} />;
     case "s8": // Settings
-      return <SettingsModal open onClose={() => navigate("s1")} />;
+      return <SettingsModal open onClose={() => navigate({ id: "s1" })} />;
     case "s9": // Ask
-      return <AskScreen />;
+      return <AskScreen recordingId={route.recordingId} />;
     case "s10": // Share
-      return <ShareScreen />;
+      return <ShareScreen recordingId={route.recordingId} />;
   }
 }
 
-function App({ initialRoute = "s1" }: AppProps) {
+function App({ initialRoute = { id: "s1" } }: AppProps) {
   const [route, setRoute] = useState<Route>(initialRoute);
 
   return (
-    <AppShell activeRoute={route} onNavigate={setRoute}>
-      <div className="screen-container" data-testid={`screen-${route}`}>
+    <AppShell activeRouteId={route.id} onNavigate={(id) => setRoute({ id })}>
+      <div className="screen-container" data-testid={`screen-${route.id}`}>
         <ErrorBoundary>{renderScreen(route, setRoute)}</ErrorBoundary>
       </div>
     </AppShell>

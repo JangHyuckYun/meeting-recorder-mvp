@@ -1,11 +1,14 @@
 import { type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import type { Route } from "@/routes";
+import type { RouteId } from "@/routes";
+
+/** The nav rail only ever links to param-less screens. */
+type NavRouteId = "s1" | "s3" | "s5" | "s6" | "s8";
 
 interface AppShellProps {
-  activeRoute: Route;
+  activeRouteId: RouteId;
   children: ReactNode;
-  onNavigate: (route: Route) => void;
+  onNavigate: (routeId: NavRouteId) => void;
 }
 
 function HomeIcon() {
@@ -52,7 +55,7 @@ function SettingsIcon() {
   );
 }
 
-const NAV_ITEMS: { route: Route; label: string; title: string; Icon: () => ReactNode }[] = [
+const NAV_ITEMS: { route: NavRouteId; label: string; title: string; Icon: () => ReactNode }[] = [
   { route: "s1", label: "홈", title: "홈", Icon: HomeIcon },
   { route: "s3", label: "실시간", title: "실시간 기록", Icon: MicIcon },
   { route: "s6", label: "가져오기", title: "가져오기", Icon: ImportIcon },
@@ -60,7 +63,7 @@ const NAV_ITEMS: { route: Route; label: string; title: string; Icon: () => React
   { route: "s8", label: "설정", title: "설정", Icon: SettingsIcon },
 ];
 
-export function AppShell({ activeRoute, children, onNavigate }: AppShellProps) {
+export function AppShell({ activeRouteId, children, onNavigate }: AppShellProps) {
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="주요 메뉴">
@@ -71,11 +74,11 @@ export function AppShell({ activeRoute, children, onNavigate }: AppShellProps) {
           {NAV_ITEMS.map(({ route, label, title, Icon }) => (
             <button
               key={route}
-              className={cn("nav-button", activeRoute === route && "active")}
+              className={cn("nav-button", activeRouteId === route && "active")}
               type="button"
               title={title}
               aria-label={title}
-              aria-current={activeRoute === route ? "page" : undefined}
+              aria-current={activeRouteId === route ? "page" : undefined}
               onClick={() => onNavigate(route)}
             >
               <Icon />

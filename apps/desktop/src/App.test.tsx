@@ -59,8 +59,8 @@ vi.mock("@/platform/appClient", () => ({
 afterEach(cleanup);
 
 describe("S1-S10 router", () => {
-  it.each(ROUTES)("renders the %s screen container", (route) => {
+  it.each(ROUTES)("renders the $id screen container", (route) => {
     render(<App initialRoute={route} />);
-    expect(screen.getByTestId(`screen-${route}`)).toBeTruthy();
+    expect(screen.getByTestId(`screen-${route.id}`)).toBeTruthy();
   });
 });
