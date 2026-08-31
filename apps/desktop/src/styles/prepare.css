@@ -1,0 +1,146 @@
+/* Prepare (S2) surface — matches the app-shell register (DESIGN.md §0):
+ * hairline seams, one blue accent on the primary action.
+ * Tokens: styles/global.css. */
+
+.prepare-screen {
+  height: 100%;
+  overflow-y: auto;
+  background: hsl(var(--surface));
+}
+
+.prepare-header {
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.prepare-eyebrow {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.prepare-header h1 {
+  margin: 6px 0 0;
+  color: hsl(var(--foreground));
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.prepare-lede {
+  margin: 4px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.prepare-body {
+  max-width: 720px;
+  padding: 20px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prepare-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prepare-field label {
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.prepare-field input,
+.prepare-field select,
+.prepare-field textarea {
+  width: 100%;
+  padding: 0 10px;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-family: inherit;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.prepare-field input,
+.prepare-field select {
+  height: 34px;
+}
+
+.prepare-field textarea {
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.prepare-field input:hover:not(:disabled),
+.prepare-field select:hover:not(:disabled),
+.prepare-field textarea:hover:not(:disabled) {
+  border-color: hsl(var(--border-strong));
+}
+
+.prepare-field input:disabled,
+.prepare-field select:disabled,
+.prepare-field textarea:disabled {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--surface-sunken));
+}
+
+.prepare-hint {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.prepare-row {
+  display: flex;
+  gap: 16px;
+}
+
+.prepare-row .prepare-field {
+  flex: 1;
+}
+
+.prepare-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+}
+
+.prepare-pill {
+  padding: 4px 8px;
+  color: hsl(var(--primary-soft-foreground));
+  font-size: 12px;
+  font-weight: 600;
+  background: hsl(var(--primary-soft));
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.prepare-pill-input {
+  flex: 1;
+  min-width: 140px;
+  height: 26px;
+  border: none !important;
+  padding: 0 4px !important;
+}
+
+.prepare-start {
+  align-self: flex-start;
+  height: 40px;
+  padding: 0 22px;
+}
