@@ -1,0 +1,186 @@
+/* Templates surface (S5) — list + editor split, matches app-shell register:
+ * hairline seams, rows over cards for the list, one blue accent.
+ * Tokens: styles/global.css. */
+
+.templates-screen {
+  height: 100%;
+  overflow-y: auto;
+  background: hsl(var(--surface));
+}
+
+.templates-header {
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.templates-eyebrow {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.templates-header h1 {
+  margin: 6px 0 0;
+  color: hsl(var(--foreground));
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.templates-lede {
+  margin: 4px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.templates-body {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  max-width: 1040px;
+  padding: 20px 24px 32px;
+}
+
+.templates-list {
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+.templates-list-label {
+  padding: 8px 12px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  text-transform: uppercase;
+  background: hsl(var(--surface-sunken));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.templates-list-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  cursor: pointer;
+}
+
+.templates-list-item:hover {
+  background: hsl(var(--accent));
+}
+
+.templates-list-item[aria-current="true"] {
+  color: hsl(var(--primary-soft-foreground));
+  font-weight: 600;
+  background: hsl(var(--primary-soft));
+}
+
+.templates-list-item span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.templates-list-add {
+  color: hsl(var(--primary));
+  font-weight: 600;
+  border-bottom: 0;
+}
+
+.templates-editor {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+}
+
+.templates-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.templates-editor-eyebrow {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.templates-editor-title {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.templates-field {
+  margin-bottom: 10px;
+}
+
+.templates-field label {
+  display: block;
+  margin-bottom: 4px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.templates-input,
+.templates-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+}
+
+.templates-input[aria-invalid="true"] {
+  border-color: hsl(var(--destructive));
+}
+
+.templates-field-error {
+  margin: 4px 0 0;
+  color: hsl(var(--destructive));
+  font-size: 11px;
+}
+
+.templates-textarea {
+  min-height: 220px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.templates-editor-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.templates-editor-actions .spacer {
+  flex: 1;
+}
+
+.templates-empty {
+  padding: 24px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  text-align: center;
+}
