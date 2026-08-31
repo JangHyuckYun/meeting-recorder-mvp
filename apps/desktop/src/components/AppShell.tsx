@@ -1,14 +1,19 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { SettingsModal } from "./SettingsModal";
-import { ErrorBoundary } from "./ErrorBoundary";
-
-type AppView = "live" | "history" | "import";
+import type { Route } from "@/routes";
 
 interface AppShellProps {
-  activeView: AppView;
+  activeRoute: Route;
   children: ReactNode;
-  onNavigate: (view: AppView) => void;
+  onNavigate: (route: Route) => void;
+}
+
+function HomeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 11.5 12 4l8 7.5M6 10v9h12v-9" />
+    </svg>
+  );
 }
 
 function MicIcon() {
@@ -16,15 +21,6 @@ function MicIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="8" y="3" width="8" height="13" rx="4" />
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
-    </svg>
-  );
-}
-
-function HistoryIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-      <path d="M3 3v5h5M12 7v5l3 2" />
     </svg>
   );
 }
@@ -38,15 +34,33 @@ function ImportIcon() {
   );
 }
 
-const NAV_ITEMS: { view: AppView; label: string; title: string; Icon: () => ReactNode }[] = [
-  { view: "live", label: "실시간", title: "실시간 녹음", Icon: MicIcon },
-  { view: "history", label: "히스토리", title: "녹음 히스토리", Icon: HistoryIcon },
-  { view: "import", label: "가져오기", title: "가져오기", Icon: ImportIcon },
+function TemplateIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M4 10h16M10 10v10" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" />
+    </svg>
+  );
+}
+
+const NAV_ITEMS: { route: Route; label: string; title: string; Icon: () => ReactNode }[] = [
+  { route: "s1", label: "홈", title: "홈", Icon: HomeIcon },
+  { route: "s3", label: "실시간", title: "실시간 기록", Icon: MicIcon },
+  { route: "s6", label: "가져오기", title: "가져오기", Icon: ImportIcon },
+  { route: "s5", label: "템플릿", title: "템플릿", Icon: TemplateIcon },
+  { route: "s8", label: "설정", title: "설정", Icon: SettingsIcon },
 ];
 
-export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
+export function AppShell({ activeRoute, children, onNavigate }: AppShellProps) {
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="주요 메뉴">
@@ -54,15 +68,15 @@ export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
           M
         </div>
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map(({ view, label, title, Icon }) => (
+          {NAV_ITEMS.map(({ route, label, title, Icon }) => (
             <button
-              key={view}
-              className={cn("nav-button", activeView === view && "active")}
+              key={route}
+              className={cn("nav-button", activeRoute === route && "active")}
               type="button"
               title={title}
               aria-label={title}
-              aria-current={activeView === view ? "page" : undefined}
-              onClick={() => onNavigate(view)}
+              aria-current={activeRoute === route ? "page" : undefined}
+              onClick={() => onNavigate(route)}
             >
               <Icon />
               <span>{label}</span>
@@ -75,16 +89,13 @@ export function AppShell({ activeView, children, onNavigate }: AppShellProps) {
             className="profile-dot"
             title="설정 열기"
             aria-label="설정 열기"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => onNavigate("s8")}
           >
             윤
           </button>
         </div>
       </aside>
       <main className="workspace">{children}</main>
-      <ErrorBoundary>
-        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      </ErrorBoundary>
     </div>
   );
 }

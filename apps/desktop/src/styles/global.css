@@ -8,6 +8,13 @@
  * Colors are stored as bare HSL triplets ("H S% L%") so they compose with
  * Tailwind's `hsl(var(--token) / <alpha-value>)` and with canvas painting
  * (see src/lib/design-tokens.ts).
+ *
+ * ponytail: the S1-S10 mockups (tiro-teardown/redesign/mockups/tokens.css)
+ * use the same semantic names (surface, sunken, muted, subtle, border,
+ * border-strong, primary, radius, font/mono) as a flat hex palette — this
+ * file already is that design intent, just as HSL triplets with a fuller
+ * ramp (status colors, speaker lanes, dark mode). Converged here rather
+ * than adding a second token file; no new tokens were needed to build S1-S10.
  */
 
 @tailwind base;

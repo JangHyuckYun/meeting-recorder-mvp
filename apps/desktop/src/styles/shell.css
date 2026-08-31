@@ -159,3 +159,21 @@ button.profile-dot:hover {
   overflow: hidden;
   background: hsl(var(--surface));
 }
+
+/* Router outlet — each route's screen mounts inside this so it keeps the
+ * full height its CSS (e.g. .live-screen { height: 100% }) expects. */
+.screen-container {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Placeholder for screens not yet rebuilt against the S1-S10 redesign. */
+.placeholder-screen {
+  padding: 40px;
+  color: hsl(var(--muted-foreground));
+}
+
+.placeholder-screen h1 {
+  margin: 8px 0;
+  color: hsl(var(--foreground));
+}
