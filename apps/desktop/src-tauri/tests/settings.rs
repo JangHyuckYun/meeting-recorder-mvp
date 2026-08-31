@@ -72,6 +72,44 @@ async fn stt_engine_defaults_and_roundtrips() {
 }
 
 #[tokio::test]
+async fn glossary_defaults_empty_and_roundtrips_dropping_blanks() {
+    let dir = tempfile::tempdir().expect("tempdir should create");
+    let db_path = dir.path().join("glossary-test.sqlite3");
+    let storage = Storage::connect(&db_path)
+        .await
+        .expect("storage should connect and migrate");
+
+    assert!(storage
+        .get_glossary()
+        .await
+        .expect("glossary should load on fresh database")
+        .is_empty());
+
+    storage
+        .set_glossary(&["오르카".to_string(), "  ".to_string(), " STT ".to_string()])
+        .await
+        .expect("glossary should persist");
+    assert_eq!(
+        storage
+            .get_glossary()
+            .await
+            .expect("glossary should reload"),
+        vec!["오르카".to_string(), "STT".to_string()]
+    );
+
+    // Corrupt values degrade to an empty glossary instead of failing transcription.
+    storage
+        .set_setting("glossary", "not json")
+        .await
+        .expect("set should succeed");
+    assert!(storage
+        .get_glossary()
+        .await
+        .expect("corrupt glossary should not error")
+        .is_empty());
+}
+
+#[tokio::test]
 async fn elevenlabs_key_stored_raw_and_masked() {
     let dir = tempfile::tempdir().expect("tempdir should create");
     let db_path = dir.path().join("elevenlabs-key-test.sqlite3");

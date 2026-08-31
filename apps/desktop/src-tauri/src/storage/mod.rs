@@ -21,8 +21,14 @@ impl Storage {
         }
         let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))?
             .create_if_missing(true);
-        let pool = SqlitePoolOptions::new().max_connections(5).connect_with(opts).await?;
-        sqlx::migrate!("./migrations").run(&pool).await.map_err(|e| sqlx::Error::Migrate(Box::new(e)))?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect_with(opts)
+            .await?;
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .map_err(|e| sqlx::Error::Migrate(Box::new(e)))?;
         Ok(Self { pool })
     }
 
@@ -192,7 +198,9 @@ impl Storage {
 
     /// Returns all app settings as a single AppSettings struct.
     pub async fn get_settings(&self) -> AppResult<crate::models::AppSettings> {
-        let llm_provider = self.get_setting("llm_provider").await?
+        let llm_provider = self
+            .get_setting("llm_provider")
+            .await?
             .as_deref()
             .and_then(crate::models::LlmProvider::from_db_str)
             .unwrap_or_default();
@@ -220,6 +228,28 @@ impl Storage {
         self.get_setting("elevenlabs_api_key").await
     }
 
+    /// Domain glossary (keyterms) biasing STT. Stored as a JSON array in the settings KV;
+    /// unset or corrupt values read back as an empty glossary rather than failing.
+    pub async fn get_glossary(&self) -> AppResult<Vec<String>> {
+        Ok(self
+            .get_setting("glossary")
+            .await?
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+            .unwrap_or_default())
+    }
+
+    pub async fn set_glossary(&self, terms: &[String]) -> AppResult<()> {
+        let cleaned: Vec<&str> = terms
+            .iter()
+            .map(|term| term.trim())
+            .filter(|term| !term.is_empty())
+            .collect();
+        let json = serde_json::to_string(&cleaned).map_err(|error| {
+            AppError::InvalidState(format!("failed to serialize glossary: {error}"))
+        })?;
+        self.set_setting("glossary", &json).await
+    }
+
     // ------------------------------------------------------------------
     // Provider registry
     // ------------------------------------------------------------------
@@ -230,7 +260,8 @@ impl Storage {
         )
         .fetch_all(&self.pool)
         .await?;
-        let mut providers: Vec<crate::models::ProviderSummary> = rows.iter().map(row_to_provider).collect();
+        let mut providers: Vec<crate::models::ProviderSummary> =
+            rows.iter().map(row_to_provider).collect();
         // Mask stored API keys before returning to frontend
         for provider in &mut providers {
             if !provider.api_key_masked.is_empty() {
@@ -243,7 +274,9 @@ impl Storage {
     pub async fn add_provider(&self, input: &crate::models::ProviderInput) -> AppResult<Uuid> {
         let id = Uuid::new_v4();
         let provider_type = crate::models::ProviderType::from_db_str(&input.provider_type)
-            .ok_or_else(|| AppError::InvalidState(format!("unknown provider type: {}", input.provider_type)))?;
+            .ok_or_else(|| {
+                AppError::InvalidState(format!("unknown provider type: {}", input.provider_type))
+            })?;
         sqlx::query(
             "INSERT INTO providers (id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 0, ?7)",
         )
@@ -260,18 +293,23 @@ impl Storage {
     }
 
     pub async fn update_provider(&self, input: &crate::models::ProviderInput) -> AppResult<()> {
-        let id = input.id.as_deref()
+        let id = input
+            .id
+            .as_deref()
             .and_then(|s| Uuid::parse_str(s).ok())
             .ok_or_else(|| AppError::InvalidState("provider id required for update".to_string()))?;
         let provider_type = crate::models::ProviderType::from_db_str(&input.provider_type)
-            .ok_or_else(|| AppError::InvalidState(format!("unknown provider type: {}", input.provider_type)))?;
+            .ok_or_else(|| {
+                AppError::InvalidState(format!("unknown provider type: {}", input.provider_type))
+            })?;
         let api_key = if input.api_key.is_empty() {
             // keep existing key if no new key provided
             let row = sqlx::query("SELECT api_key_masked FROM providers WHERE id = ?1")
                 .bind(id.to_string())
                 .fetch_optional(&self.pool)
                 .await?;
-            row.map(|r| r.get::<String, _>("api_key_masked")).unwrap_or_default()
+            row.map(|r| r.get::<String, _>("api_key_masked"))
+                .unwrap_or_default()
         } else {
             input.api_key.clone()
         };
@@ -302,18 +340,26 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn get_assigned_provider_model(&self, purpose: &str) -> AppResult<Option<(Uuid, String)>> {
-        let row = sqlx::query("SELECT provider_id, model_name FROM model_assignments WHERE purpose = ?1")
-            .bind(purpose)
-            .fetch_optional(&self.pool)
-            .await?;
+    pub async fn get_assigned_provider_model(
+        &self,
+        purpose: &str,
+    ) -> AppResult<Option<(Uuid, String)>> {
+        let row =
+            sqlx::query("SELECT provider_id, model_name FROM model_assignments WHERE purpose = ?1")
+                .bind(purpose)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|r| {
-            let pid = Uuid::parse_str(r.get::<String, _>("provider_id").as_str()).unwrap_or_default();
+            let pid =
+                Uuid::parse_str(r.get::<String, _>("provider_id").as_str()).unwrap_or_default();
             (pid, r.get::<String, _>("model_name"))
         }))
     }
 
-    pub async fn get_provider(&self, id: Uuid) -> AppResult<Option<crate::models::ProviderSummary>> {
+    pub async fn get_provider(
+        &self,
+        id: Uuid,
+    ) -> AppResult<Option<crate::models::ProviderSummary>> {
         let row = sqlx::query("SELECT id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at FROM providers WHERE id = ?1")
             .bind(id.to_string())
             .fetch_optional(&self.pool)
@@ -321,7 +367,12 @@ impl Storage {
         Ok(row.as_ref().map(row_to_provider))
     }
 
-    pub async fn set_model_assignment(&self, purpose: &str, provider_id: &str, model_name: &str) -> AppResult<()> {
+    pub async fn set_model_assignment(
+        &self,
+        purpose: &str,
+        provider_id: &str,
+        model_name: &str,
+    ) -> AppResult<()> {
         sqlx::query(
             "INSERT INTO model_assignments (purpose, provider_id, model_name) VALUES (?1, ?2, ?3) ON CONFLICT(purpose) DO UPDATE SET provider_id = excluded.provider_id, model_name = excluded.model_name",
         )
@@ -348,16 +399,19 @@ fn row_to_recording(row: &sqlx::sqlite::SqliteRow) -> Recording {
         source_path: row.get("source_path"),
         duration_ms: row.get("duration_ms"),
         status: RecordingStatus::from_db_str(row.get::<String, _>("status").as_str()),
-        created_at: chrono::DateTime::parse_from_rfc3339(row.get::<String, _>("created_at").as_str())
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(|_| chrono::Utc::now()),
+        created_at: chrono::DateTime::parse_from_rfc3339(
+            row.get::<String, _>("created_at").as_str(),
+        )
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now()),
     }
 }
 
 fn row_to_segment(row: &sqlx::sqlite::SqliteRow) -> TranscriptSegment {
     TranscriptSegment {
         id: Uuid::parse_str(row.get::<String, _>("id").as_str()).unwrap_or_default(),
-        recording_id: Uuid::parse_str(row.get::<String, _>("recording_id").as_str()).unwrap_or_default(),
+        recording_id: Uuid::parse_str(row.get::<String, _>("recording_id").as_str())
+            .unwrap_or_default(),
         start_ms: row.get("start_ms"),
         end_ms: row.get("end_ms"),
         speaker_label: row.get("speaker_label"),
@@ -385,8 +439,10 @@ fn row_to_provider(row: &sqlx::sqlite::SqliteRow) -> crate::models::ProviderSumm
 fn row_to_assignment(row: &sqlx::sqlite::SqliteRow) -> crate::models::ModelAssignment {
     use crate::models::*;
     ModelAssignment {
-        purpose: ModelPurpose::from_db_str(row.get::<String, _>("purpose").as_str()).unwrap_or_default(),
-        provider_id: Uuid::parse_str(row.get::<String, _>("provider_id").as_str()).unwrap_or_default(),
+        purpose: ModelPurpose::from_db_str(row.get::<String, _>("purpose").as_str())
+            .unwrap_or_default(),
+        provider_id: Uuid::parse_str(row.get::<String, _>("provider_id").as_str())
+            .unwrap_or_default(),
         model_name: row.get("model_name"),
     }
 }

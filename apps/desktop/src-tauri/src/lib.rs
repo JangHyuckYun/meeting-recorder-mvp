@@ -53,6 +53,8 @@ pub fn run() {
             commands::get_app_settings,
             commands::set_app_settings,
             commands::set_elevenlabs_api_key,
+            commands::get_glossary,
+            commands::set_glossary,
             commands::get_oauth_status,
             commands::start_oauth_login,
             commands::list_providers,
