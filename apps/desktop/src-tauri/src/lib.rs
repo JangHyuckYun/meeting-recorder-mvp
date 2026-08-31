@@ -45,6 +45,7 @@ pub fn run() {
             commands::stop_recording,
             commands::list_recordings,
             commands::get_recording_detail,
+            commands::delete_recording,
             commands::transcribe_recording,
             commands::ingest_audio_file,
             commands::generate_minutes,

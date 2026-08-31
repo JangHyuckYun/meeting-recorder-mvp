@@ -80,6 +80,29 @@ impl Storage {
         Ok(row.as_ref().map(row_to_recording))
     }
 
+    /// Deletes a recording and everything hanging off it. SQLite foreign keys are not
+    /// enabled on this pool, so the children are removed explicitly rather than by cascade.
+    /// Returns `NotFound` when the id does not exist so the command layer can report it.
+    pub async fn delete_recording(&self, id: Uuid) -> AppResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query("DELETE FROM recordings WHERE id = ?1")
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if deleted == 0 {
+            return Err(AppError::NotFound(format!("recording {id} not found")));
+        }
+        for table in ["transcript_segments", "minutes_drafts"] {
+            sqlx::query(&format!("DELETE FROM {table} WHERE recording_id = ?1"))
+                .bind(id.to_string())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn insert_segments(&self, segments: &[TranscriptSegment]) -> AppResult<()> {
         let mut tx = self.pool.begin().await?;
         for seg in segments {

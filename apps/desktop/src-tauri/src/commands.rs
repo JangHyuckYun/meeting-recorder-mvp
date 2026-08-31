@@ -111,6 +111,22 @@ pub async fn get_recording_detail(
     Ok((rec, segments))
 }
 
+/// Deletes a recording, its transcript/minutes rows, and its archived WAV file. A missing
+/// audio file is not an error (an ingest may have been cleaned up already); a missing
+/// recording row is `NotFound`.
+#[tauri::command]
+pub async fn delete_recording(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let uuid = Uuid::parse_str(&id).map_err(|e| AppError::InvalidState(format!("bad id: {e}")))?;
+    let rec = state
+        .storage
+        .get_recording(uuid)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("recording {id} not found")))?;
+    state.storage.delete_recording(uuid).await?;
+    let _ = std::fs::remove_file(&rec.source_path);
+    Ok(())
+}
+
 /// Runs STT + online speaker diarization against the self-hosted WhisperLive server
 /// (infra/stt-server/) for an already-recorded WAV, persists the resulting segments, and
 /// flips the recording status. Used both for live captures and for ingested test files.
