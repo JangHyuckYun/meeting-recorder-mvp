@@ -532,6 +532,50 @@ pub async fn assign_recording_folder(
         .await
 }
 
+/// Answers a question grounded in one recording's transcript and minutes, through the same
+/// LLM provider the minutes pipeline uses (only the prompt differs). Citations are best-effort:
+/// an answer the model failed to cite comes back with empty `sources`, never an error.
+#[tauri::command]
+pub async fn ask_note(
+    state: State<'_, AppState>,
+    recording_id: String,
+    question: String,
+) -> AppResult<crate::models::AskAnswer> {
+    let uuid = Uuid::parse_str(&recording_id)
+        .map_err(|error| AppError::InvalidState(format!("bad recording id: {error}")))?;
+    let segments = state.storage.list_segments(uuid).await?;
+    let minutes = state.storage.get_minutes(uuid).await?;
+    let minutes = minutes.as_ref();
+
+    if let Some((provider_id, model_name)) = state
+        .storage
+        .get_assigned_provider_model("minutes_generation")
+        .await?
+    {
+        if let Some(provider) = state.storage.get_provider(provider_id).await? {
+            if provider.is_builtin {
+                let llm = match provider.provider_type.as_str() {
+                    "openai" => LlmProvider::CodexOauth,
+                    "anthropic" => LlmProvider::ClaudeOauth,
+                    _ => stored_llm_provider(&state.storage).await?,
+                };
+                return minutes::ask_note(llm, &question, &segments, minutes).await;
+            }
+            let resolved = minutes::ResolvedProvider {
+                provider_type: crate::models::ProviderType::from_db_str(&provider.provider_type)
+                    .unwrap_or(crate::models::ProviderType::OpenaiCompatible),
+                base_url: provider.base_url.clone(),
+                api_key: provider.api_key_masked.clone(),
+                model: model_name,
+            };
+            return minutes::ask_note_with_resolved(resolved, &question, &segments, minutes).await;
+        }
+    }
+
+    let llm_provider = stored_llm_provider(&state.storage).await?;
+    minutes::ask_note(llm_provider, &question, &segments, minutes).await
+}
+
 /// Writes the recording's transcript to the user's Downloads directory in one of
 /// "srt" | "vtt" | "md" | "txt" and returns the absolute path written.
 #[tauri::command]

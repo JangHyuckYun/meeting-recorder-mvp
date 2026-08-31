@@ -102,6 +102,22 @@ pub struct MinutesItem {
     pub evidence_segment_ids: Vec<Uuid>,
 }
 
+/// Answer to a grounded question about one recording, with the transcript segments the model
+/// cited. Sources are best-effort: an answer the model failed to cite still returns cleanly
+/// with an empty `sources`, never an error.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskAnswer {
+    pub answer: String,
+    pub sources: Vec<AskSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskSource {
+    pub segment_id: Uuid,
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
 /// 48kHz sample index as the canonical clock for audio timing.
 /// Milliseconds are presentation values; the sample index is the source of truth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

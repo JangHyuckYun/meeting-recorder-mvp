@@ -7,8 +7,8 @@ pub(crate) mod oauth_status;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    CaptionEvent, CaptionStatus, LlmProvider, MinutesDraft, MinutesItem, ProviderType,
-    TranscriptSegment,
+    AskAnswer, AskSource, CaptionEvent, CaptionStatus, LlmProvider, MinutesDraft, MinutesItem,
+    ProviderType, TranscriptSegment,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -507,6 +507,149 @@ pub async fn edit_minutes_item_text_with_resolved(
         ));
     }
     Ok(text)
+}
+
+// ------------------------------------------------------------------
+// Grounded Q&A over one recording
+// ------------------------------------------------------------------
+
+const ASK_SYSTEM_PROMPT: &str = concat!(
+    "당신은 특정 회의 기록에 대해서만 답하는 한국어 어시스턴트입니다. 제공된 전사와 회의록에 있는 내용만 사용하세요. ",
+    "근거가 없으면 추측하지 말고 기록에 없다고 답하세요. ",
+    "답변을 뒷받침하는 전사 세그먼트의 id를 source_segment_ids에 원문 그대로 인용하세요. ",
+    "JSON 스키마 이외의 텍스트를 출력하지 마세요."
+);
+
+fn ask_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["answer", "source_segment_ids"],
+        "properties": {
+            "answer": {"type": "string", "minLength": 1},
+            "source_segment_ids": {
+                "type": "array",
+                "items": {"type": "string", "format": "uuid"}
+            }
+        }
+    })
+}
+
+/// Builds the user prompt for [`ask_note`]: the question plus the whole grounding context.
+pub fn ask_user_prompt(
+    question: &str,
+    segments: &[TranscriptSegment],
+    minutes: Option<&MinutesDraft>,
+) -> AppResult<String> {
+    let transcript = segments
+        .iter()
+        .filter(|segment| segment.is_final && !segment.text.trim().is_empty())
+        .map(|segment| {
+            json!({
+                "id": segment.id,
+                "start_ms": segment.start_ms,
+                "end_ms": segment.end_ms,
+                "speaker_label": segment.speaker_label,
+                "text": segment.text,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&json!({
+        "question": question,
+        "transcript": transcript,
+        "minutes": minutes.map(|draft| json!({
+            "summary": draft.summary,
+            "decisions": draft.decisions.iter().map(|item| &item.text).collect::<Vec<_>>(),
+            "action_items": draft.action_items.iter().map(|item| &item.text).collect::<Vec<_>>(),
+        })),
+    }))
+    .map_err(|error| AppError::InvalidState(format!("failed to serialize ask request: {error}")))
+}
+
+/// Best-effort parse of the model's answer. Citations the model invented, malformed, or omitted
+/// are dropped silently — a usable answer with no sources beats an error the user cannot act on.
+pub fn parse_ask_response(response: &str, segments: &[TranscriptSegment]) -> AskAnswer {
+    let parsed: Option<Value> = serde_json::from_str(response).ok();
+    let answer = parsed
+        .as_ref()
+        .and_then(|value| value["answer"].as_str())
+        .map(str::trim)
+        .filter(|answer| !answer.is_empty())
+        .map(str::to_string)
+        // The provider may return prose instead of the requested JSON; that prose IS the answer.
+        .unwrap_or_else(|| response.trim().to_string());
+
+    let cited: HashSet<Uuid> = parsed
+        .as_ref()
+        .and_then(|value| value["source_segment_ids"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|id| id.as_str().and_then(|id| Uuid::parse_str(id).ok()))
+        .collect();
+    let sources = segments
+        .iter()
+        .filter(|segment| cited.contains(&segment.id))
+        .map(|segment| AskSource {
+            segment_id: segment.id,
+            start_ms: segment.start_ms,
+            end_ms: segment.end_ms,
+        })
+        .collect();
+
+    AskAnswer { answer, sources }
+}
+
+/// Answers a question about one recording through the built-in OAuth/LiteLLM provider path.
+pub async fn ask_note(
+    provider: LlmProvider,
+    question: &str,
+    segments: &[TranscriptSegment],
+    minutes: Option<&MinutesDraft>,
+) -> AppResult<AskAnswer> {
+    let user_prompt = ask_question_prompt(question, segments, minutes)?;
+    let content =
+        request_structured_json(provider, ASK_SYSTEM_PROMPT, &user_prompt, ask_schema()).await?;
+    Ok(parse_ask_response(&content, segments))
+}
+
+/// Same, through a provider resolved from the model_assignments table.
+pub async fn ask_note_with_resolved(
+    resolved: ResolvedProvider,
+    question: &str,
+    segments: &[TranscriptSegment],
+    minutes: Option<&MinutesDraft>,
+) -> AppResult<AskAnswer> {
+    let user_prompt = ask_question_prompt(question, segments, minutes)?;
+    let content = request_structured_json_by_type(
+        resolved.provider_type,
+        &resolved.base_url,
+        &resolved.api_key,
+        &resolved.model,
+        ASK_SYSTEM_PROMPT,
+        &user_prompt,
+        &ask_schema(),
+    )
+    .await?;
+    Ok(parse_ask_response(&content, segments))
+}
+
+fn ask_question_prompt(
+    question: &str,
+    segments: &[TranscriptSegment],
+    minutes: Option<&MinutesDraft>,
+) -> AppResult<String> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err(AppError::InvalidState(
+            "question cannot be empty".to_string(),
+        ));
+    }
+    if segments.is_empty() {
+        return Err(AppError::InvalidState(
+            "cannot answer questions without a transcript".to_string(),
+        ));
+    }
+    ask_user_prompt(question, segments, minutes)
 }
 
 /// The minutes system prompt, with an optional user template appended. The template is the

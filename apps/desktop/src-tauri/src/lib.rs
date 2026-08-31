@@ -63,6 +63,7 @@ pub fn run() {
             commands::create_folder,
             commands::delete_folder,
             commands::assign_recording_folder,
+            commands::ask_note,
             commands::export_transcript,
             commands::get_speaker_names,
             commands::set_speaker_name,
