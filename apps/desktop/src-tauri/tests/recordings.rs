@@ -21,6 +21,7 @@ fn recording(title: &str, source_path: &str) -> Recording {
         duration_ms: Some(1_000),
         status: RecordingStatus::Recorded,
         created_at: chrono::Utc::now(),
+        folder_id: None,
     }
 }
 
@@ -54,6 +55,83 @@ async fn delete_recording_removes_row_and_child_segments() {
         .await
         .expect("segments should still query")
         .is_empty());
+}
+
+#[tokio::test]
+async fn folder_assignment_roundtrips_and_survives_folder_deletion() {
+    let (_dir, storage) = storage("folders-test.sqlite3").await;
+    let rec = recording("주간 회의", "/tmp/a.wav");
+    storage.insert_recording(&rec).await.expect("insert");
+
+    assert!(storage.list_folders().await.expect("list").is_empty());
+    let folder = storage
+        .create_folder("  프로젝트 A  ")
+        .await
+        .expect("create");
+    assert_eq!(folder.name, "프로젝트 A");
+    assert_eq!(storage.list_folders().await.expect("list").len(), 1);
+
+    storage
+        .assign_recording_folder(rec.id, Some(folder.id))
+        .await
+        .expect("assign");
+    let listed = storage.list_recordings().await.expect("list recordings");
+    assert_eq!(listed[0].folder_id, Some(folder.id));
+
+    // Unfiling is an explicit None, not a separate command.
+    storage
+        .assign_recording_folder(rec.id, None)
+        .await
+        .expect("unassign");
+    assert_eq!(
+        storage
+            .get_recording(rec.id)
+            .await
+            .expect("get")
+            .unwrap()
+            .folder_id,
+        None
+    );
+
+    // Deleting a folder unfiles its recordings instead of deleting them.
+    storage
+        .assign_recording_folder(rec.id, Some(folder.id))
+        .await
+        .expect("reassign");
+    storage
+        .delete_folder(folder.id)
+        .await
+        .expect("delete folder");
+    let survivor = storage
+        .get_recording(rec.id)
+        .await
+        .expect("get")
+        .expect("recording must survive folder deletion");
+    assert_eq!(survivor.folder_id, None);
+}
+
+#[tokio::test]
+async fn folder_and_recording_assignment_errors_are_typed() {
+    let (_dir, storage) = storage("folders-error-test.sqlite3").await;
+
+    assert!(matches!(
+        storage.create_folder("   ").await.expect_err("blank name"),
+        AppError::InvalidState(_)
+    ));
+    assert!(matches!(
+        storage
+            .delete_folder(Uuid::new_v4())
+            .await
+            .expect_err("unknown folder"),
+        AppError::NotFound(_)
+    ));
+    assert!(matches!(
+        storage
+            .assign_recording_folder(Uuid::new_v4(), None)
+            .await
+            .expect_err("unknown recording"),
+        AppError::NotFound(_)
+    ));
 }
 
 #[tokio::test]

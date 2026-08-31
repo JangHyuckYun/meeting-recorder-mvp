@@ -14,6 +14,17 @@ pub struct Recording {
     pub duration_ms: Option<i64>,
     pub status: RecordingStatus,
     pub created_at: DateTime<Utc>,
+    /// Folder this recording is filed under, or `None` for the unfiled root list.
+    #[serde(default)]
+    pub folder_id: Option<Uuid>,
+}
+
+/// A user-created folder grouping recordings in the sidebar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Folder {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -374,4 +385,3 @@ impl Default for AppSettings {
         }
     }
 }
-

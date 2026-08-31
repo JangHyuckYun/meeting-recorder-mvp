@@ -34,7 +34,7 @@ impl Storage {
 
     pub async fn insert_recording(&self, rec: &Recording) -> AppResult<()> {
         sqlx::query(
-            "INSERT INTO recordings (id, title, source_path, duration_ms, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO recordings (id, title, source_path, duration_ms, status, created_at, folder_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(rec.id.to_string())
         .bind(&rec.title)
@@ -42,6 +42,7 @@ impl Storage {
         .bind(rec.duration_ms)
         .bind(rec.status.as_str())
         .bind(rec.created_at.to_rfc3339())
+        .bind(rec.folder_id.map(|id| id.to_string()))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -66,14 +67,14 @@ impl Storage {
     }
 
     pub async fn list_recordings(&self) -> AppResult<Vec<Recording>> {
-        let rows = sqlx::query("SELECT id, title, source_path, duration_ms, status, created_at FROM recordings ORDER BY created_at DESC")
+        let rows = sqlx::query("SELECT id, title, source_path, duration_ms, status, created_at, folder_id FROM recordings ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await?;
         Ok(rows.iter().map(row_to_recording).collect())
     }
 
     pub async fn get_recording(&self, id: Uuid) -> AppResult<Option<Recording>> {
-        let row = sqlx::query("SELECT id, title, source_path, duration_ms, status, created_at FROM recordings WHERE id = ?1")
+        let row = sqlx::query("SELECT id, title, source_path, duration_ms, status, created_at, folder_id FROM recordings WHERE id = ?1")
             .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await?;
@@ -100,6 +101,77 @@ impl Storage {
                 .await?;
         }
         tx.commit().await?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Folders
+    // ------------------------------------------------------------------
+
+    pub async fn list_folders(&self) -> AppResult<Vec<crate::models::Folder>> {
+        let rows = sqlx::query("SELECT id, name, created_at FROM folders ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.iter().map(row_to_folder).collect())
+    }
+
+    pub async fn create_folder(&self, name: &str) -> AppResult<crate::models::Folder> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::InvalidState(
+                "folder name cannot be empty".to_string(),
+            ));
+        }
+        let folder = crate::models::Folder {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            created_at: chrono::Utc::now(),
+        };
+        sqlx::query("INSERT INTO folders (id, name, created_at) VALUES (?1, ?2, ?3)")
+            .bind(folder.id.to_string())
+            .bind(&folder.name)
+            .bind(folder.created_at.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        Ok(folder)
+    }
+
+    /// Deletes a folder; its recordings survive and fall back to the unfiled list.
+    pub async fn delete_folder(&self, id: Uuid) -> AppResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query("DELETE FROM folders WHERE id = ?1")
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if deleted == 0 {
+            return Err(AppError::NotFound(format!("folder {id} not found")));
+        }
+        sqlx::query("UPDATE recordings SET folder_id = NULL WHERE folder_id = ?1")
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Files a recording under a folder, or unfiles it when `folder_id` is `None`.
+    pub async fn assign_recording_folder(
+        &self,
+        recording_id: Uuid,
+        folder_id: Option<Uuid>,
+    ) -> AppResult<()> {
+        let affected = sqlx::query("UPDATE recordings SET folder_id = ?1 WHERE id = ?2")
+            .bind(folder_id.map(|id| id.to_string()))
+            .bind(recording_id.to_string())
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if affected == 0 {
+            return Err(AppError::NotFound(format!(
+                "recording {recording_id} not found"
+            )));
+        }
         Ok(())
     }
 
@@ -422,6 +494,21 @@ fn row_to_recording(row: &sqlx::sqlite::SqliteRow) -> Recording {
         source_path: row.get("source_path"),
         duration_ms: row.get("duration_ms"),
         status: RecordingStatus::from_db_str(row.get::<String, _>("status").as_str()),
+        created_at: chrono::DateTime::parse_from_rfc3339(
+            row.get::<String, _>("created_at").as_str(),
+        )
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now()),
+        folder_id: row
+            .get::<Option<String>, _>("folder_id")
+            .and_then(|id| Uuid::parse_str(&id).ok()),
+    }
+}
+
+fn row_to_folder(row: &sqlx::sqlite::SqliteRow) -> crate::models::Folder {
+    crate::models::Folder {
+        id: Uuid::parse_str(row.get::<String, _>("id").as_str()).unwrap_or_default(),
+        name: row.get("name"),
         created_at: chrono::DateTime::parse_from_rfc3339(
             row.get::<String, _>("created_at").as_str(),
         )

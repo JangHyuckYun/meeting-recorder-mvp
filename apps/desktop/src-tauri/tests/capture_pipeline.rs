@@ -17,7 +17,8 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn storage_roundtrip_persists_recording_and_segments() {
-    let tmp = std::env::temp_dir().join(format!("capture-pipeline-test-{}.sqlite3", Uuid::new_v4()));
+    let tmp =
+        std::env::temp_dir().join(format!("capture-pipeline-test-{}.sqlite3", Uuid::new_v4()));
     let storage = Storage::connect(&tmp).await.expect("connect");
 
     let rec = Recording {
@@ -27,10 +28,15 @@ async fn storage_roundtrip_persists_recording_and_segments() {
         duration_ms: Some(12_345),
         status: RecordingStatus::Recorded,
         created_at: chrono::Utc::now(),
+        folder_id: None,
     };
     storage.insert_recording(&rec).await.expect("insert");
 
-    let fetched = storage.get_recording(rec.id).await.expect("get").expect("present");
+    let fetched = storage
+        .get_recording(rec.id)
+        .await
+        .expect("get")
+        .expect("present");
     assert_eq!(fetched.title, "테스트 회의");
     assert_eq!(fetched.status, RecordingStatus::Recorded);
     assert_eq!(fetched.duration_ms, Some(12_345));
@@ -59,7 +65,10 @@ async fn real_test_audio_transcribes_with_speaker_labels() {
     let audio_dir = std::env::var("TEST_AUDIO_DIR")
         .unwrap_or_else(|_| "/Users/janghyeok/Downloads/record_test_data".to_string());
     let src = PathBuf::from(&audio_dir).join("등촌동 12.m4a");
-    assert!(src.exists(), "test fixture missing: {src:?} (set TEST_AUDIO_DIR)");
+    assert!(
+        src.exists(),
+        "test fixture missing: {src:?} (set TEST_AUDIO_DIR)"
+    );
 
     let wav = std::env::temp_dir().join(format!("stt-smoke-{}.wav", Uuid::new_v4()));
     convert_m4a_to_wav(&src, &wav);
@@ -72,14 +81,30 @@ async fn real_test_audio_transcribes_with_speaker_labels() {
 
     let _ = std::fs::remove_file(&wav);
 
-    assert!(!segments.is_empty(), "expected at least one transcribed segment");
+    assert!(
+        !segments.is_empty(),
+        "expected at least one transcribed segment"
+    );
     for seg in &segments {
-        assert!(!seg.text.trim().is_empty(), "segment text should not be empty");
-        assert!(seg.end_ms >= seg.start_ms, "segment end must not precede start");
+        assert!(
+            !seg.text.trim().is_empty(),
+            "segment text should not be empty"
+        );
+        assert!(
+            seg.end_ms >= seg.start_ms,
+            "segment end must not precede start"
+        );
     }
-    println!("transcribed {} segments from {:?}", segments.len(), src.file_name().unwrap());
+    println!(
+        "transcribed {} segments from {:?}",
+        segments.len(),
+        src.file_name().unwrap()
+    );
     for seg in segments.iter().take(5) {
-        println!("  [{}] {}-{}ms: {}", seg.speaker_label, seg.start_ms, seg.end_ms, seg.text);
+        println!(
+            "  [{}] {}-{}ms: {}",
+            seg.speaker_label, seg.start_ms, seg.end_ms, seg.text
+        );
     }
 }
 
@@ -111,7 +136,10 @@ async fn real_longer_test_audio_transcribes_with_speaker_labels() {
 
     let _ = std::fs::remove_file(&wav);
 
-    assert!(!segments.is_empty(), "expected at least one transcribed segment");
+    assert!(
+        !segments.is_empty(),
+        "expected at least one transcribed segment"
+    );
     let distinct_speakers = segments
         .iter()
         .map(|s| s.speaker_label.as_str())
@@ -124,6 +152,9 @@ async fn real_longer_test_audio_transcribes_with_speaker_labels() {
         src.file_name().unwrap()
     );
     for seg in segments.iter().take(8) {
-        println!("  [{}] {}-{}ms: {}", seg.speaker_label, seg.start_ms, seg.end_ms, seg.text);
+        println!(
+            "  [{}] {}-{}ms: {}",
+            seg.speaker_label, seg.start_ms, seg.end_ms, seg.text
+        );
     }
 }

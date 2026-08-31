@@ -52,6 +52,7 @@ pub async fn start_recording(
         duration_ms: None,
         status: RecordingStatus::Recording,
         created_at: chrono::Utc::now(),
+        folder_id: None,
     };
     state.storage.insert_recording(&rec).await?;
     *state.capture.lock().unwrap() = Some((id, session));
@@ -305,6 +306,7 @@ pub async fn ingest_audio_file(
         duration_ms: Some(duration_ms),
         status: RecordingStatus::Recorded,
         created_at: chrono::Utc::now(),
+        folder_id: None,
     };
     state.storage.insert_recording(&rec).await?;
     Ok(rec)
@@ -416,6 +418,53 @@ pub async fn set_elevenlabs_api_key(state: State<'_, AppState>, api_key: String)
     state
         .storage
         .set_setting("elevenlabs_api_key", &api_key)
+        .await
+}
+
+// ------------------------------------------------------------------
+// Folders
+// ------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn list_folders(state: State<'_, AppState>) -> AppResult<Vec<crate::models::Folder>> {
+    state.storage.list_folders().await
+}
+
+#[tauri::command]
+pub async fn create_folder(
+    state: State<'_, AppState>,
+    name: String,
+) -> AppResult<crate::models::Folder> {
+    state.storage.create_folder(&name).await
+}
+
+/// Deletes a folder. Recordings filed under it are unfiled, never deleted.
+#[tauri::command]
+pub async fn delete_folder(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let uuid =
+        Uuid::parse_str(&id).map_err(|e| AppError::InvalidState(format!("bad folder id: {e}")))?;
+    state.storage.delete_folder(uuid).await
+}
+
+/// Files a recording under a folder; `folderId: null` unfiles it.
+#[tauri::command]
+pub async fn assign_recording_folder(
+    state: State<'_, AppState>,
+    recording_id: String,
+    folder_id: Option<String>,
+) -> AppResult<()> {
+    let recording_uuid = Uuid::parse_str(&recording_id)
+        .map_err(|e| AppError::InvalidState(format!("bad recording id: {e}")))?;
+    let folder_uuid = match folder_id.as_deref().filter(|id| !id.is_empty()) {
+        Some(id) => Some(
+            Uuid::parse_str(id)
+                .map_err(|e| AppError::InvalidState(format!("bad folder id: {e}")))?,
+        ),
+        None => None,
+    };
+    state
+        .storage
+        .assign_recording_folder(recording_uuid, folder_uuid)
         .await
 }
 
