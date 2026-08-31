@@ -180,6 +180,83 @@
   font-weight: 700;
 }
 
+/* ---- transcription step: speaker/language options + progress --------- */
+
+.import-transcribe {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.import-options {
+  display: flex;
+  gap: 16px;
+}
+
+.import-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 140px;
+}
+
+.import-field-grow {
+  flex: 1;
+  width: auto;
+}
+
+.import-field label {
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.import-field input,
+.import-field select {
+  height: 32px;
+  padding: 0 10px;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+}
+
+.import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+}
+
+.import-progress-track {
+  height: 8px;
+  background: hsl(var(--surface-sunken));
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.import-progress-fill {
+  height: 100%;
+  background: hsl(var(--primary));
+  border-radius: var(--radius-md);
+  transition: width var(--motion-base) var(--ease-out);
+}
+
+.import-progress-phase {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
 .success-banner {
   margin-top: 12px;
   padding: 9px 12px;

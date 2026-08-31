@@ -1,11 +1,18 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
-import { appClient } from "@/platform/appClient";
+import { appClient, type TranscriptionProgressEvent } from "@/platform/appClient";
 import { errorMessage } from "../formatters";
 import type { Recording } from "../types";
 
 const ACCEPTED_EXTENSIONS = ["m4a", "wav", "mp3", "mp4", "aac"];
+const LANGUAGES = ["한국어", "영어", "다국어"];
+
+const PHASE_LABELS: Record<TranscriptionProgressEvent["phase"], string> = {
+  sending: "업로드 · 변환 중",
+  finalizing: "화자분리 · 요약 중",
+  done: "완료",
+};
 
 export function ImportScreen() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -13,6 +20,21 @@ export function ImportScreen() {
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<Recording | null>(null);
+  // ponytail: transcribeRecording(id) takes no speaker-count/language params yet —
+  // these stay local-state only per the mockup, not sent to the backend.
+  const [speakerCount, setSpeakerCount] = useState("4");
+  const [language, setLanguage] = useState(LANGUAGES[0]);
+  const [progress, setProgress] = useState<TranscriptionProgressEvent | null>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  const unlistenRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    appClient.onTranscriptionProgress((event) => setProgress(event)).then((unlisten) => {
+      unlistenRef.current = unlisten;
+    });
+    return () => unlistenRef.current?.();
+  }, []);
 
   const pickFile = async () => {
     setError(null);
@@ -45,6 +67,28 @@ export function ImportScreen() {
       setError(errorMessage(err));
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const startTranscription = async () => {
+    if (!success) return;
+    setIsTranscribing(true);
+    setTranscribeError(null);
+    setProgress(null);
+    try {
+      await appClient.transcribeRecording(success.id);
+    } catch (err) {
+      setTranscribeError(errorMessage(err));
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const cancelTranscription = async () => {
+    try {
+      await appClient.cancelTranscription();
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
@@ -143,7 +187,84 @@ export function ImportScreen() {
         )}
         {success && (
           <div className="success-banner" role="status">
-            &quot;{success.title}&quot; 가져오기를 완료했습니다. 히스토리 탭에서 확인할 수 있습니다.
+            &quot;{success.title}&quot; 가져오기를 완료했습니다. 이어서 전사를 시작할 수 있습니다.
+          </div>
+        )}
+
+        {success && (
+          <div className="import-transcribe">
+            <div className="import-options">
+              <div className="import-field">
+                <label htmlFor="import-speaker-count">화자 수</label>
+                <input
+                  id="import-speaker-count"
+                  data-numeric
+                  type="number"
+                  min={1}
+                  value={speakerCount}
+                  onChange={(e) => setSpeakerCount(e.currentTarget.value)}
+                  disabled={isTranscribing}
+                />
+              </div>
+              <div className="import-field import-field-grow">
+                <label htmlFor="import-language">언어</label>
+                <select
+                  id="import-language"
+                  value={language}
+                  onChange={(e) => setLanguage(e.currentTarget.value)}
+                  disabled={isTranscribing}
+                >
+                  {LANGUAGES.map((lang) => (
+                    <option key={lang}>{lang}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {progress && (
+              <div className="import-progress">
+                <div className="import-progress-head">
+                  <b>전사 진행률</b>
+                  <span data-numeric>
+                    {progress.total_ms > 0
+                      ? Math.round((progress.sent_ms / progress.total_ms) * 100)
+                      : 0}
+                    %
+                  </span>
+                </div>
+                <div className="import-progress-track">
+                  <div
+                    className="import-progress-fill"
+                    style={{
+                      width: `${
+                        progress.total_ms > 0
+                          ? Math.min(100, (progress.sent_ms / progress.total_ms) * 100)
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+                <span className="import-progress-phase">{PHASE_LABELS[progress.phase]}</span>
+              </div>
+            )}
+
+            {transcribeError && (
+              <div className="error-banner" role="alert">
+                전사 실패: {transcribeError}
+              </div>
+            )}
+
+            <div className="import-actions">
+              {isTranscribing ? (
+                <Button variant="outline" size="sm" onClick={cancelTranscription}>
+                  전사 취소
+                </Button>
+              ) : (
+                <Button size="sm" onClick={startTranscription}>
+                  전사 시작
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </div>
