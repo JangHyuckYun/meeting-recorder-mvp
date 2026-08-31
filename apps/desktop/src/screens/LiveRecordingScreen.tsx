@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { CaptionTimeline, SpeakerTracks, WavVisualizer } from "@/components/canvas";
 import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { appClient } from "@/platform/appClient";
 import { MinutesView } from "../components/MinutesView";
 import { errorMessage, formatDuration } from "../formatters";
 import type { Recording } from "../types";
@@ -31,9 +31,7 @@ export function LiveRecordingScreen() {
     setError(null);
 
     try {
-      const nextRecording = await invoke<Recording>("start_recording", {
-        title: recordingTitle,
-      });
+      const nextRecording = await appClient.startRecording(recordingTitle);
       setRecording(nextRecording);
       setTitle(recordingTitle);
       setElapsedMs(0);
@@ -51,7 +49,7 @@ export function LiveRecordingScreen() {
     setError(null);
 
     try {
-      const completedRecording = await invoke<Recording>("stop_recording");
+      const completedRecording = await appClient.stopRecording();
       setRecording(completedRecording);
       setElapsedMs(completedRecording.duration_ms ?? elapsedMs);
       setIsRecording(false);

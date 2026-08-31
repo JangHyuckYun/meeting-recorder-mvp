@@ -1,7 +1,7 @@
 import { useState, type SyntheticEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { appClient } from "@/platform/appClient";
 import { errorMessage } from "../formatters";
 import type { MinutesDraft, MinutesItem } from "../types";
 
@@ -96,11 +96,11 @@ export function MinutesView({ minutes = MOCK_MINUTES, compact = false, recording
     setIsSubmitting(true);
     setEditError(null);
     try {
-      const updated = await invoke<MinutesItem>("edit_minutes_item", {
+      const updated = await appClient.editMinutesItem(
         recordingId,
-        itemId: editing.item.id,
-        instruction: trimmedInstruction,
-      });
+        editing.item.id,
+        trimmedInstruction,
+      );
       onItemEdited?.(editing.section, editing.item.id, updated.text);
       setEditing(null);
       setInstruction("");

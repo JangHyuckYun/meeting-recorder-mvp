@@ -1,7 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { Button } from "@/components/ui";
+import { appClient } from "@/platform/appClient";
 import { errorMessage } from "../formatters";
 import type { Recording } from "../types";
 
@@ -37,10 +37,7 @@ export function ImportScreen() {
     setSuccess(null);
     try {
       const importedTitle = title.trim() || selectedPath.split("/").pop() || selectedPath;
-      const recording = await invoke<Recording>("ingest_audio_file", {
-        sourcePath: selectedPath,
-        title: importedTitle,
-      });
+      const recording = await appClient.ingestAudioFile(selectedPath, importedTitle);
       setSuccess(recording);
       setSelectedPath(null);
       setTitle("");

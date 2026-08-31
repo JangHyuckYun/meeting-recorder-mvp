@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
+import { appClient } from "@/platform/appClient";
 import { errorMessage } from "../formatters";
 import type {
   AppSettings,
@@ -220,7 +220,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // ── Load data on open ────────────────────────────────────────────────
 
   const loadAppSettings = async () => {
-    const appSettings = await invoke<AppSettings>("get_app_settings");
+    const appSettings = await appClient.getAppSettings();
     setSttServerUrl(appSettings.stt_server_url ?? "");
     setSttEngine(appSettings.stt_engine ?? "self_hosted");
     setElevenLabsKeyMasked(appSettings.elevenlabs_api_key_masked ?? null);
@@ -236,7 +236,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
     const load = async () => {
       try {
-        const provs = await invoke<Provider[]>("list_providers");
+        const provs = await appClient.listProviders();
         setProviders(provs);
         setProviderError(null);
       } catch (e) {
@@ -244,7 +244,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       }
 
       try {
-        const assigns = await invoke<ModelAssignment[]>("get_model_assignments");
+        const assigns = await appClient.getModelAssignments();
         const assignMap: Record<string, ModelAssignment> = {};
         for (const a of assigns) {
           assignMap[a.purpose] = a;
@@ -263,7 +263,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       // Load OAuth statuses for built-in providers
       for (const pid of OAUTH_PROVIDER_IDS) {
         try {
-          const status = await invoke<OAuthStatus>("get_oauth_status", { provider: pid });
+          const status = await appClient.getOAuthStatus(pid);
           setOauthStatuses((prev) => ({ ...prev, [pid]: status }));
         } catch {
           setOauthStatuses((prev) => ({ ...prev, [pid]: null }));
@@ -293,8 +293,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const handleAddProvider = async (input: ProviderInput) => {
     setProviderError(null);
     try {
-      await invoke<string>("add_provider", { input });
-      const provs = await invoke<Provider[]>("list_providers");
+      await appClient.addProvider(input);
+      const provs = await appClient.listProviders();
       setProviders(provs);
       setShowAddForm(false);
     } catch (e) {
@@ -305,7 +305,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const handleDeleteProvider = async (id: string) => {
     setProviderError(null);
     try {
-      await invoke<void>("delete_provider", { id });
+      await appClient.deleteProvider(id);
       setProviders((prev) => prev.filter((p) => p.id !== id));
       // Also clear any assignment referencing this provider
       setAssignments((prev) => {
@@ -325,7 +325,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setAssignmentError(null);
     try {
       const input: ModelAssignmentInput = { purpose, provider_id: providerId, model_name: modelName };
-      await invoke<void>("set_model_assignment", { input });
+      await appClient.setModelAssignment(input);
       setAssignments((prev) => ({
         ...prev,
         [purpose]: { purpose: purpose as ModelAssignment["purpose"], provider_id: providerId, model_name: modelName },
@@ -341,7 +341,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setIsSavingKey(true);
     setVoiceError(null);
     try {
-      await invoke<void>("set_elevenlabs_api_key", { apiKey });
+      await appClient.setElevenLabsApiKey(apiKey);
       setElevenLabsKeyInput("");
       await loadAppSettings();
     } catch (e) {
@@ -355,14 +355,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setIsSaving(true);
     void (async () => {
       try {
-        await invoke<void>("set_app_settings", {
-          settings: {
-            llm_provider: "codex_oauth" as LlmProvider,
-            stt_server_url: sttServerUrl || null,
-            stt_engine: sttEngine,
-            elevenlabs_api_key_masked: elevenLabsKeyMasked,
-          } satisfies AppSettings,
-        });
+        await appClient.setAppSettings({
+          llm_provider: "codex_oauth" as LlmProvider,
+          stt_server_url: sttServerUrl || null,
+          stt_engine: sttEngine,
+          elevenlabs_api_key_masked: elevenLabsKeyMasked,
+        } satisfies AppSettings);
         onClose();
       } catch (e) {
         setError(errorMessage(e));

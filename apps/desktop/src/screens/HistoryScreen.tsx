@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
+import { appClient, type TranscriptionProgressEvent } from "@/platform/appClient";
 import { MinutesView } from "../components/MinutesView";
 import { errorMessage, formatDate, formatDuration, STATUS_LABELS } from "../formatters";
 import type { MinutesDraft, Recording, TranscriptSegment } from "../types";
@@ -9,13 +9,6 @@ interface RecordingDetail {
   recording: Recording;
   segments: TranscriptSegment[];
 }
-
-type TranscriptionProgressEvent = {
-  recording_id: string;
-  sent_ms: number;
-  total_ms: number;
-  phase: "sending" | "finalizing" | "done";
-};
 
 function EmptyHistory() {
   return (
@@ -41,7 +34,7 @@ export function HistoryScreen() {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await invoke<Recording[]>("list_recordings");
+      const result = await appClient.listRecordings();
       setRecordings(result);
     } catch (invokeError) {
       setError(errorMessage(invokeError));
@@ -59,14 +52,9 @@ export function HistoryScreen() {
     setError(null);
     setMinutesDraft(null);
     try {
-      const [recording, segments] = await invoke<[Recording, TranscriptSegment[]]>(
-        "get_recording_detail",
-        { id },
-      );
+      const [recording, segments] = await appClient.getRecordingDetail(id);
       setDetail({ recording, segments });
-      const existingMinutes = await invoke<MinutesDraft | null>("get_minutes", {
-        recordingId: id,
-      });
+      const existingMinutes = await appClient.getMinutes(id);
       if (existingMinutes) setMinutesDraft(existingMinutes);
     } catch (invokeError) {
       setError(errorMessage(invokeError));
@@ -82,18 +70,12 @@ export function HistoryScreen() {
     setTranscriptionProgress((prev) => ({ ...prev, [recId]: null as unknown as TranscriptionProgressEvent }));
     setError(null);
 
-    const { listen } = await import("@tauri-apps/api/event");
-    const unlisten = await listen<TranscriptionProgressEvent>(
-      "transcription-progress",
-      (event) => {
-        if (event.payload.recording_id !== recId) return;
-        setTranscriptionProgress((prev) => ({ ...prev, [recId]: event.payload }));
-      },
-    );
+    const unlisten = await appClient.onTranscriptionProgress((progress) => {
+      if (progress.recording_id !== recId) return;
+      setTranscriptionProgress((prev) => ({ ...prev, [recId]: progress }));
+    });
     try {
-      const segments = await invoke<TranscriptSegment[]>("transcribe_recording", {
-        id: recId,
-      });
+      const segments = await appClient.transcribeRecording(recId);
       const recording = { ...detail.recording, status: "transcribed" as const };
       setDetail({ recording, segments });
       setRecordings((current) =>
@@ -113,7 +95,7 @@ export function HistoryScreen() {
 
   const cancelTranscription = async () => {
     try {
-      await invoke("cancel_transcription");
+      await appClient.cancelTranscription();
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
@@ -125,7 +107,7 @@ export function HistoryScreen() {
     // Reset status to recorded so the transcribe button reappears
     // Also update the backend DB
     try {
-      await invoke("update_recording_status", { id: detail.recording.id, status: "recorded" });
+      await appClient.updateRecordingStatus(detail.recording.id, "recorded");
     } catch { /* ignore */ }
     const updated = { ...detail.recording, status: "recorded" as const };
     setDetail({
@@ -143,9 +125,7 @@ export function HistoryScreen() {
     setIsGeneratingMinutes(true);
     setError(null);
     try {
-      const draft = await invoke<MinutesDraft>("generate_minutes", {
-        recordingId: detail.recording.id,
-      });
+      const draft = await appClient.generateMinutes(detail.recording.id);
       setMinutesDraft(draft);
     } catch (invokeError) {
       setError(errorMessage(invokeError));
