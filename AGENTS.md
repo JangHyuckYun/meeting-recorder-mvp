@@ -7,6 +7,9 @@
 - 상태 lifecycle: `요청` → `진행중`(브랜치 생성 시) → `리뷰(PR)`(PR 오픈 시, PR URL 기입) → `완료`(머지 시, 완료일 기입). 막히면 `보류` + 사유.
 - 작업내역은 row 페이지 본문 `## 작업내역`에 `- YYYY-MM-DD …` 로 누적. 에이전트 자체 todo는 휘발성, 여기 기록만 durable.
 
+## 사고 기록
+- `error-log.md`(레포 루트)에 재발 방지 규칙이 일자별로 있다. 작업 시작 전에 읽고, 새 사고는 같은 형식으로 추가한다.
+
 ## 개발 흐름
 - 신규/개선 요청은 `main`(또는 선행 PR 브랜치)에서 `feat/<영역-요약>` 브랜치를 파고, 영역별로 PR을 나눈다.
 - TDD: vitest(프론트) / cargo test(Rust) 테스트를 먼저 추가하고 구현. PR 전 `pnpm exec tsc --noEmit`, `pnpm vitest run`, `cargo check && cargo test` 통과.
