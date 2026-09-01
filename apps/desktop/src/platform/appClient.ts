@@ -77,7 +77,8 @@ export const appClient = {
 
   // ── Minutes ─────────────────────────────────────────────────────────
   getMinutes: (recordingId: string) => invoke<MinutesDraft | null>("get_minutes", { recordingId }),
-  generateMinutes: (recordingId: string) => invoke<MinutesDraft>("generate_minutes", { recordingId }),
+  generateMinutes: (recordingId: string, templateId?: string) =>
+    invoke<MinutesDraft>("generate_minutes", { recordingId, templateId }),
   editMinutesItem: (recordingId: string, itemId: string, instruction: string) =>
     invoke<MinutesItem>("edit_minutes_item", { recordingId, itemId, instruction }),
 
