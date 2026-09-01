@@ -7,6 +7,8 @@
 //! subscription without requiring a separate API key.
 
 use crate::error::{AppError, AppResult};
+use crate::minutes::{apply_model_options, ModelOptions};
+use crate::models::ProviderType;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -16,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
-const DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-4-5";
+const DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-5";
 const ANTHROPIC_TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const ANTHROPIC_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const ANTHROPIC_API_VERSION: &str = "2023-06-01";
@@ -44,6 +46,7 @@ pub(super) async fn request_structured_json(
     system_prompt: &str,
     user_prompt: &str,
     schema: &Value,
+    options: Option<&ModelOptions<'_>>,
 ) -> AppResult<String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -64,8 +67,10 @@ pub(super) async fn request_structured_json(
 
     let base_url = std::env::var("MINUTES_CLAUDE_BASE_URL")
         .unwrap_or_else(|_| DEFAULT_ANTHROPIC_BASE_URL.to_string());
-    let model = std::env::var("MINUTES_CLAUDE_MODEL")
-        .unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string());
+    let model = options.map_or_else(
+        || std::env::var("MINUTES_CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string()),
+        |options| options.model.to_string(),
+    );
     let endpoint = format!("{}/v1/messages", base_url.trim_end_matches('/'));
     let schema_json = serde_json::to_string(schema).map_err(|error| {
         AppError::InvalidState(format!(
@@ -76,20 +81,25 @@ pub(super) async fn request_structured_json(
         "{system_prompt}\n\nReturn exactly one valid JSON object and no other text. Do not use Markdown fences. The object must conform to this JSON Schema:\n{schema_json}"
     );
 
-    let response = client
+    let mut body = json!({
+        "model": model,
+        "max_tokens": 4096,
+        "system": instructions,
+        "messages": [{"role": "user", "content": user_prompt}]
+    });
+    let fast_beta = apply_model_options(
+        &mut body,
+        ProviderType::Anthropic,
+        options.or(Some(&ModelOptions { model: &model, reasoning_effort: None, fast: false })),
+    );
+    let request = client
         .post(endpoint)
         .bearer_auth(&credentials.access_token)
         .header("anthropic-version", ANTHROPIC_API_VERSION)
-        .header("anthropic-beta", ANTHROPIC_BETAS)
+        .header("anthropic-beta", if fast_beta { format!("{ANTHROPIC_BETAS},fast-mode-2026-02-01") } else { ANTHROPIC_BETAS.to_string() })
         .header("accept", "application/json")
-        .json(&json!({
-            "model": model,
-            "max_tokens": 4096,
-            "system": instructions,
-            "messages": [{"role": "user", "content": user_prompt}]
-        }))
-        .send()
-        .await?;
+        .json(&body);
+    let response = request.send().await?;
     let status = response.status();
     let response_body = response.text().await?;
     if !status.is_success() {

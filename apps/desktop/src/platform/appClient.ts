@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppSettings,
+  CaptionEventData,
   MinutesDraft,
   MinutesItem,
   ModelAssignment,
@@ -61,10 +62,12 @@ export const appClient = {
   getRecordingDetail: (id: string) =>
     invoke<[Recording, TranscriptSegment[]]>("get_recording_detail", { id }),
   startRecording: (title: string) => invoke<Recording>("start_recording", { title }),
-  stopRecording: () => invoke<Recording>("stop_recording"),
+  stopRecording: (captions: CaptionEventData[]) =>
+    invoke<Recording>("stop_recording", { captions }),
   ingestAudioFile: (sourcePath: string, title: string) =>
     invoke<Recording>("ingest_audio_file", { sourcePath, title }),
-  transcribeRecording: (id: string) => invoke<TranscriptSegment[]>("transcribe_recording", { id }),
+  transcribeRecording: (id: string, speakers?: number | null) =>
+    invoke<TranscriptSegment[]>("transcribe_recording", { id, speakers }),
   cancelTranscription: () => invoke<void>("cancel_transcription"),
   updateRecordingStatus: (id: string, status: string) =>
     invoke<void>("update_recording_status", { id, status }),
@@ -115,9 +118,11 @@ export const appClient = {
   setElevenLabsApiKey: (apiKey: string) => invoke<void>("set_elevenlabs_api_key", { apiKey }),
   listProviders: () => invoke<Provider[]>("list_providers"),
   addProvider: (input: ProviderInput) => invoke<string>("add_provider", { input }),
+  updateProvider: (input: ProviderInput) => invoke<void>("update_provider", { input }),
   deleteProvider: (id: string) => invoke<void>("delete_provider", { id }),
   getModelAssignments: () => invoke<ModelAssignment[]>("get_model_assignments"),
   setModelAssignment: (input: ModelAssignmentInput) => invoke<void>("set_model_assignment", { input }),
+  listRemoteModels: (providerId: string) => invoke<string[]>("list_remote_models", { providerId }),
   getOAuthStatus: (provider: string) => invoke<OAuthStatus>("get_oauth_status", { provider }),
 };
 

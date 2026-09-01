@@ -5,8 +5,8 @@ use crate::audio::capture::CaptureSession;
 use crate::error::{AppError, AppResult};
 use crate::minutes;
 use crate::models::{
-    AppSettings, LlmProvider, MinutesDraft, MinutesItem, Recording, RecordingStatus, SttEngine,
-    TranscriptSegment,
+    AppSettings, CaptionEvent, LlmProvider, MinutesDraft, MinutesItem, Recording, RecordingStatus,
+    SttEngine, TranscriptSegment,
 };
 use crate::storage::Storage;
 use crate::stt::{self, SttConfig};
@@ -60,7 +60,10 @@ pub async fn start_recording(
 }
 
 #[tauri::command]
-pub async fn stop_recording(state: State<'_, AppState>) -> AppResult<Recording> {
+pub async fn stop_recording(
+    state: State<'_, AppState>,
+    captions: Vec<CaptionEvent>,
+) -> AppResult<Recording> {
     let (id, session) = state
         .capture
         .lock()
@@ -69,6 +72,11 @@ pub async fn stop_recording(state: State<'_, AppState>) -> AppResult<Recording> 
         .ok_or_else(|| AppError::InvalidState("no recording in progress".to_string()))?;
     let (_, duration_ms) = session.stop()?;
     state.storage.set_duration(id, duration_ms).await?;
+    let mut segments = minutes::filter_caption_segments_for_minutes(&captions);
+    for segment in &mut segments {
+        segment.recording_id = id;
+    }
+    state.storage.insert_segments(&segments).await?;
     state
         .storage
         .update_status(id, RecordingStatus::Recorded)
@@ -136,6 +144,7 @@ pub async fn transcribe_recording(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,
+    speakers: Option<u32>,
 ) -> AppResult<Vec<TranscriptSegment>> {
     let uuid = Uuid::parse_str(&id).map_err(|e| AppError::InvalidState(format!("bad id: {e}")))?;
     let rec = state
@@ -144,11 +153,15 @@ pub async fn transcribe_recording(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("recording {id} not found")))?;
 
+    let settings = state.storage.get_settings().await?;
+    let speakers = speakers.or(settings.speakers);
+    if speakers == Some(0) {
+        return Err(AppError::InvalidState("speakers must be positive".to_string()));
+    }
     state
         .storage
         .update_status(uuid, RecordingStatus::Transcribing)
         .await?;
-    let settings = state.storage.get_settings().await?;
     let wav_path = PathBuf::from(&rec.source_path);
 
     let result = match settings.stt_engine {
@@ -162,7 +175,7 @@ pub async fn transcribe_recording(
                 let cfg = stt::elevenlabs::ElevenLabsConfig {
                     api_key,
                     language_code: Some("ko".to_string()),
-                    num_speakers: None,
+                    num_speakers: speakers,
                     keyterms: state.storage.get_glossary().await?,
                     ..Default::default()
                 };
@@ -199,10 +212,13 @@ pub async fn transcribe_recording(
             let ws_url = settings
                 .stt_server_url
                 .unwrap_or_else(|| "ws://192.168.1.189:9090".to_string());
-            let cfg = SttConfig {
+            let mut cfg = SttConfig {
                 ws_url,
                 ..SttConfig::default()
             };
+            if let Some(speakers) = speakers {
+                cfg.max_speakers = speakers;
+            }
             let (progress_sender, mut progress_receiver) =
                 tokio::sync::mpsc::unbounded_channel::<stt::TranscriptionProgress>();
             tokio::spawn(async move {
@@ -327,7 +343,7 @@ pub async fn generate_minutes(
     let template = template.as_deref();
 
     // Try model_assignments table first; fall back to stored_llm_provider for backward compat.
-    if let Some((provider_id, model_name)) = state
+    if let Some((provider_id, model_name, reasoning_effort, fast)) = state
         .storage
         .get_assigned_provider_model("minutes_generation")
         .await?
@@ -336,23 +352,27 @@ pub async fn generate_minutes(
             // Built-in OAuth providers use CLI credentials, not direct API keys.
             // Route them through the existing OAuth path.
             if provider.is_builtin {
+                let options = minutes::ModelOptions { model: &model_name, reasoning_effort: reasoning_effort.as_deref(), fast };
                 let llm = match provider.provider_type.as_str() {
                     "openai" => LlmProvider::CodexOauth,
                     "anthropic" => LlmProvider::ClaudeOauth,
                     _ => stored_llm_provider(&state.storage).await?,
                 };
                 let draft =
-                    minutes::generate_minutes(llm, recording_id, &segments, template).await?;
+                    minutes::generate_minutes(llm, recording_id, &segments, template, Some(&options)).await?;
                 state.storage.save_minutes(&draft).await?;
                 return Ok(draft);
             }
 
+            let (provider_type, base_url, api_key) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
             let resolved = ResolvedProvider {
-                provider_type: crate::models::ProviderType::from_db_str(&provider.provider_type)
+                provider_type: crate::models::ProviderType::from_db_str(&provider_type)
                     .unwrap_or(crate::models::ProviderType::OpenaiCompatible),
-                base_url: provider.base_url.clone(),
-                api_key: provider.api_key_masked.clone(),
+                base_url,
+                api_key,
                 model: model_name,
+                reasoning_effort,
+                fast,
             };
             let draft = minutes::generate_minutes_with_resolved(
                 resolved,
@@ -368,7 +388,7 @@ pub async fn generate_minutes(
 
     // Fallback: stored llm_provider setting
     let llm_provider = stored_llm_provider(&state.storage).await?;
-    let draft = minutes::generate_minutes(llm_provider, recording_id, &segments, template).await?;
+    let draft = minutes::generate_minutes(llm_provider, recording_id, &segments, template, None).await?;
     state.storage.save_minutes(&draft).await?;
     Ok(draft)
 }
@@ -407,6 +427,9 @@ async fn stored_llm_provider(storage: &Storage) -> AppResult<LlmProvider> {
 /// edit; an in-flight LLM call finishes on its original provider.
 #[tauri::command]
 pub async fn set_app_settings(state: State<'_, AppState>, settings: AppSettings) -> AppResult<()> {
+    if settings.speakers == Some(0) {
+        return Err(AppError::InvalidState("speakers must be positive".to_string()));
+    }
     state
         .storage
         .set_setting("llm_provider", settings.llm_provider.as_str())
@@ -418,6 +441,11 @@ pub async fn set_app_settings(state: State<'_, AppState>, settings: AppSettings)
         .storage
         .set_setting("stt_engine", settings.stt_engine.as_str())
         .await?;
+    let speakers = settings
+        .speakers
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "auto".to_string());
+    state.storage.set_setting("speakers", &speakers).await?;
     Ok(())
 }
 
@@ -547,33 +575,37 @@ pub async fn ask_note(
     let minutes = state.storage.get_minutes(uuid).await?;
     let minutes = minutes.as_ref();
 
-    if let Some((provider_id, model_name)) = state
+    if let Some((provider_id, model_name, reasoning_effort, fast)) = state
         .storage
         .get_assigned_provider_model("minutes_generation")
         .await?
     {
         if let Some(provider) = state.storage.get_provider(provider_id).await? {
             if provider.is_builtin {
+                let options = minutes::ModelOptions { model: &model_name, reasoning_effort: reasoning_effort.as_deref(), fast };
                 let llm = match provider.provider_type.as_str() {
                     "openai" => LlmProvider::CodexOauth,
                     "anthropic" => LlmProvider::ClaudeOauth,
                     _ => stored_llm_provider(&state.storage).await?,
                 };
-                return minutes::ask_note(llm, &question, &segments, minutes).await;
+                return minutes::ask_note(llm, &question, &segments, minutes, Some(&options)).await;
             }
+            let (provider_type, base_url, api_key) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
             let resolved = minutes::ResolvedProvider {
-                provider_type: crate::models::ProviderType::from_db_str(&provider.provider_type)
+                provider_type: crate::models::ProviderType::from_db_str(&provider_type)
                     .unwrap_or(crate::models::ProviderType::OpenaiCompatible),
-                base_url: provider.base_url.clone(),
-                api_key: provider.api_key_masked.clone(),
+                base_url,
+                api_key,
                 model: model_name,
+                reasoning_effort,
+                fast,
             };
             return minutes::ask_note_with_resolved(resolved, &question, &segments, minutes).await;
         }
     }
 
     let llm_provider = stored_llm_provider(&state.storage).await?;
-    minutes::ask_note(llm_provider, &question, &segments, minutes).await
+    minutes::ask_note(llm_provider, &question, &segments, minutes, None).await
 }
 
 /// Writes the recording's transcript to the user's Downloads directory in one of
@@ -826,30 +858,34 @@ pub async fn edit_minutes_item(
         .collect::<Vec<_>>();
 
     // Try model_assignments table first; fall back to stored_llm_provider.
-    let replacement_text = if let Some((provider_id, model_name)) = state
+    let replacement_text = if let Some((provider_id, model_name, reasoning_effort, fast)) = state
         .storage
         .get_assigned_provider_model("minutes_edit")
         .await?
     {
         if let Some(provider) = state.storage.get_provider(provider_id).await? {
             if provider.is_builtin {
+                let options = minutes::ModelOptions { model: &model_name, reasoning_effort: reasoning_effort.as_deref(), fast };
                 let llm = match provider.provider_type.as_str() {
                     "openai" => LlmProvider::CodexOauth,
                     "anthropic" => LlmProvider::ClaudeOauth,
                     _ => stored_llm_provider(&state.storage).await?,
                 };
-                minutes::edit_minutes_item_text(llm, &original, &instruction, &evidence_segments)
+                minutes::edit_minutes_item_text(llm, &original, &instruction, &evidence_segments, Some(&options))
                     .await?
             } else {
                 use crate::minutes::ResolvedProvider;
+                let (provider_type, base_url, api_key) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
                 let resolved = ResolvedProvider {
                     provider_type: crate::models::ProviderType::from_db_str(
-                        &provider.provider_type,
+                        &provider_type,
                     )
                     .unwrap_or(crate::models::ProviderType::OpenaiCompatible),
-                    base_url: provider.base_url.clone(),
-                    api_key: provider.api_key_masked.clone(),
+                    base_url,
+                    api_key,
                     model: model_name,
+                    reasoning_effort,
+                    fast,
                 };
                 minutes::edit_minutes_item_text_with_resolved(
                     resolved,
@@ -866,12 +902,13 @@ pub async fn edit_minutes_item(
                 &original,
                 &instruction,
                 &evidence_segments,
+                None,
             )
             .await?
         }
     } else {
         let llm_provider = stored_llm_provider(&state.storage).await?;
-        minutes::edit_minutes_item_text(llm_provider, &original, &instruction, &evidence_segments)
+        minutes::edit_minutes_item_text(llm_provider, &original, &instruction, &evidence_segments, None)
             .await?
     };
 
@@ -943,6 +980,18 @@ pub async fn set_model_assignment(
 ) -> AppResult<()> {
     state
         .storage
-        .set_model_assignment(&input.purpose, &input.provider_id, &input.model_name)
+        .set_model_assignment(&input.purpose, &input.provider_id, &input.model_name, input.reasoning_effort.as_deref(), input.fast)
         .await
+}
+
+#[tauri::command]
+pub async fn list_remote_models(state: State<'_, AppState>, provider_id: String) -> AppResult<Vec<String>> {
+    let id = Uuid::parse_str(&provider_id).map_err(|e| AppError::InvalidState(format!("bad provider id: {e}")))?;
+    let (provider_type, base_url, api_key) = state.storage.provider_connection(id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
+    let endpoint = format!("{}/v1/models", if base_url.trim().is_empty() { if provider_type == "anthropic" { "https://api.anthropic.com" } else { "https://api.openai.com" } } else { base_url.trim_end_matches('/').trim_end_matches("/v1") });
+    let client = reqwest::Client::new();
+    let mut request = client.get(endpoint);
+    if provider_type == "anthropic" { request = request.header("x-api-key", api_key).header("anthropic-version", "2023-06-01"); } else if !api_key.trim().is_empty() { request = request.bearer_auth(api_key); }
+    let value: serde_json::Value = request.send().await?.error_for_status()?.json().await?;
+    Ok(value["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_owned)).collect())
 }

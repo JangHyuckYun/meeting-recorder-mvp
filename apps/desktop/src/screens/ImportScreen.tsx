@@ -20,9 +20,7 @@ export function ImportScreen() {
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<Recording | null>(null);
-  // ponytail: transcribeRecording(id) takes no speaker-count/language params yet —
-  // these stay local-state only per the mockup, not sent to the backend.
-  const [speakerCount, setSpeakerCount] = useState("4");
+  const [speakerCount, setSpeakerCount] = useState("auto");
   const [language, setLanguage] = useState(LANGUAGES[0]);
   const [progress, setProgress] = useState<TranscriptionProgressEvent | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -34,6 +32,13 @@ export function ImportScreen() {
       unlistenRef.current = unlisten;
     });
     return () => unlistenRef.current?.();
+  }, []);
+
+  useEffect(() => {
+    appClient
+      .getAppSettings()
+      .then((settings) => setSpeakerCount(settings.speakers?.toString() ?? "auto"))
+      .catch(() => {});
   }, []);
 
   const pickFile = async () => {
@@ -76,7 +81,10 @@ export function ImportScreen() {
     setTranscribeError(null);
     setProgress(null);
     try {
-      await appClient.transcribeRecording(success.id);
+      await appClient.transcribeRecording(
+        success.id,
+        speakerCount === "auto" ? null : Number(speakerCount),
+      );
     } catch (err) {
       setTranscribeError(errorMessage(err));
     } finally {
@@ -196,15 +204,20 @@ export function ImportScreen() {
             <div className="import-options">
               <div className="import-field">
                 <label htmlFor="import-speaker-count">화자 수</label>
-                <input
+                <select
                   id="import-speaker-count"
                   data-numeric
-                  type="number"
-                  min={1}
                   value={speakerCount}
                   onChange={(e) => setSpeakerCount(e.currentTarget.value)}
                   disabled={isTranscribing}
-                />
+                >
+                  <option value="auto">자동</option>
+                  {Array.from({ length: 9 }, (_, index) => index + 2).map((count) => (
+                    <option key={count} value={count}>
+                      {count}명
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="import-field import-field-grow">
                 <label htmlFor="import-language">언어</label>

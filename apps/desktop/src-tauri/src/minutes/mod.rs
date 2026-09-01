@@ -18,7 +18,53 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const DEFAULT_LITELLM_BASE_URL: &str = "http://192.168.1.189:4000";
-const DEFAULT_LITELLM_MODEL: &str = "gpt-4.1-mini";
+const DEFAULT_LITELLM_MODEL: &str = "gpt-5.6-terra";
+
+#[derive(Debug, Clone, Copy)]
+pub struct ModelOptions<'a> {
+    pub model: &'a str,
+    pub reasoning_effort: Option<&'a str>,
+    pub fast: bool,
+}
+
+pub(crate) fn apply_model_options(
+    body: &mut Value,
+    provider_type: ProviderType,
+    options: Option<&ModelOptions<'_>>,
+) -> bool {
+    let Some(options) = options else { return false };
+    match provider_type {
+        ProviderType::Openai | ProviderType::OpenaiCompatible => {
+            if !options.model.starts_with("gpt-5") && options.reasoning_effort.is_none() {
+                body["temperature"] = json!(0.1);
+            }
+            if let Some(effort) = options.reasoning_effort {
+                body["reasoning_effort"] = json!(effort);
+            }
+            if options.fast {
+                body["service_tier"] = json!("priority");
+            }
+            false
+        }
+        ProviderType::Anthropic => {
+            let no_temperature = options.model.starts_with("claude-fable-5")
+                || options.model.starts_with("claude-opus-5")
+                || options.model.starts_with("claude-sonnet-5")
+                || options.model == "claude-opus-4-7"
+                || options.model == "claude-opus-4-8";
+            body["max_tokens"] = json!(if options.reasoning_effort.is_some() { 16000 } else { 4096 });
+            if !no_temperature { body["temperature"] = json!(0.1); }
+            if let Some(effort) = options.reasoning_effort {
+                body["thinking"] = json!({"type": "adaptive"});
+                body["output_config"] = json!({"effort": effort});
+            }
+            let fast_supported = options.model.starts_with("claude-opus-5")
+                || options.model == "claude-opus-4-8";
+            if options.fast && fast_supported { body["speed"] = json!("fast"); }
+            options.fast && fast_supported
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct GeneratedMinutes {
@@ -61,6 +107,7 @@ pub async fn generate_minutes(
     recording_id: Uuid,
     segments: &[TranscriptSegment],
     template: Option<&str>,
+    options: Option<&ModelOptions<'_>>,
 ) -> AppResult<MinutesDraft> {
     let final_segments: Vec<&TranscriptSegment> = segments
         .iter()
@@ -94,7 +141,7 @@ pub async fn generate_minutes(
     );
 
     let content =
-        request_structured_json(provider, &system_prompt, &user_prompt, minutes_schema()).await?;
+        request_structured_json(provider, &system_prompt, &user_prompt, minutes_schema(), options).await?;
     let valid_segment_ids = final_segments
         .iter()
         .map(|segment| segment.id)
@@ -136,6 +183,7 @@ pub async fn edit_minutes_item_text(
     item: &MinutesItem,
     instruction: &str,
     evidence_segments: &[TranscriptSegment],
+    options: Option<&ModelOptions<'_>>,
 ) -> AppResult<String> {
     let instruction = instruction.trim();
     if instruction.is_empty() {
@@ -174,7 +222,7 @@ pub async fn edit_minutes_item_text(
         "다른 항목, id, evidence_segment_ids는 수정할 수 없습니다. 수정된 한국어 text 하나만 JSON 스키마에 맞춰 반환하세요."
     );
     let content =
-        request_structured_json(provider, system_prompt, &user_prompt, edit_schema()).await?;
+        request_structured_json(provider, system_prompt, &user_prompt, edit_schema(), options).await?;
     let edited: EditedText = serde_json::from_str(&content).map_err(|error| {
         AppError::InvalidState(format!("LLM returned invalid minutes edit JSON: {error}"))
     })?;
@@ -221,28 +269,29 @@ async fn request_structured_json(
     system_prompt: &str,
     user_prompt: &str,
     schema: Value,
+    options: Option<&ModelOptions<'_>>,
 ) -> AppResult<String> {
     match provider {
         LlmProvider::CodexOauth => {
-            return oauth_provider::request_structured_json(system_prompt, user_prompt, &schema)
-                .await;
+            return oauth_provider::request_structured_json(system_prompt, user_prompt, &schema, options).await;
         }
         LlmProvider::ClaudeOauth => {
-            return claude_provider::request_structured_json(system_prompt, user_prompt, &schema)
-                .await;
+            return claude_provider::request_structured_json(system_prompt, user_prompt, &schema, options).await;
         }
         LlmProvider::Litellm => {}
     }
 
     let base_url = std::env::var("MINUTES_LLM_BASE_URL")
         .unwrap_or_else(|_| DEFAULT_LITELLM_BASE_URL.to_string());
-    let model =
-        std::env::var("MINUTES_LLM_MODEL").unwrap_or_else(|_| DEFAULT_LITELLM_MODEL.to_string());
+    let model = options.map_or_else(
+        || std::env::var("MINUTES_LLM_MODEL").unwrap_or_else(|_| DEFAULT_LITELLM_MODEL.to_string()),
+        |options| options.model.to_string(),
+    );
     let endpoint = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()?;
-    let mut request = client.post(endpoint).json(&json!({
+    let mut body = json!({
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -257,7 +306,9 @@ async fn request_structured_json(
                 "schema": schema
             }
         }
-    }));
+    });
+    apply_model_options(&mut body, ProviderType::OpenaiCompatible, options.or(Some(&ModelOptions { model: &model, reasoning_effort: None, fast: false })));
+    let mut request = client.post(endpoint).json(&body);
     if let Ok(api_key) = std::env::var("MINUTES_LLM_API_KEY") {
         if !api_key.trim().is_empty() {
             request = request.bearer_auth(api_key);
@@ -286,10 +337,13 @@ pub async fn request_structured_json_by_type(
     system_prompt: &str,
     user_prompt: &str,
     schema: &Value,
+    reasoning_effort: Option<&str>,
+    fast: bool,
 ) -> AppResult<String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()?;
+    let options = ModelOptions { model, reasoning_effort, fast };
 
     match provider_type {
         ProviderType::Openai | ProviderType::OpenaiCompatible => {
@@ -301,13 +355,12 @@ pub async fn request_structured_json_by_type(
                     base_url.trim_end_matches('/').trim_end_matches("/v1")
                 )
             };
-            let mut request = client.post(&endpoint).json(&json!({
+            let mut body = json!({
                 "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "temperature": 0.1,
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": {
@@ -316,7 +369,9 @@ pub async fn request_structured_json_by_type(
                         "schema": schema
                     }
                 }
-            }));
+            });
+            apply_model_options(&mut body, provider_type, Some(&options));
+            let mut request = client.post(&endpoint).json(&body);
             if !api_key.trim().is_empty() {
                 request = request.bearer_auth(api_key);
             }
@@ -338,28 +393,20 @@ pub async fn request_structured_json_by_type(
             } else {
                 format!("{}/v1/messages", base_url.trim_end_matches('/'))
             };
+            let mut body = json!({
+                    "model": model,
+                    "system": system_prompt,
+                    "messages": [{"role": "user", "content": user_prompt}],
+                    "max_tokens": 4096,
+                    "extra": {"response_format": {"type": "json_schema", "json_schema": {"name": "minutes_response", "schema": schema}}}
+            });
+            let fast_beta = apply_model_options(&mut body, provider_type, Some(&options));
             let mut request = client
                 .post(&endpoint)
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
-                .json(&json!({
-                    "model": model,
-                    "system": system_prompt,
-                    "messages": [
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "max_tokens": 4096,
-                    "temperature": 0.1,
-                    "extra": {
-                        "response_format": {
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": "minutes_response",
-                                "schema": schema
-                            }
-                        }
-                    }
-                }));
+                .json(&body);
+            if fast_beta { request = request.header("anthropic-beta", "fast-mode-2026-02-01"); }
             if !api_key.trim().is_empty() {
                 request = request.header("x-api-key", api_key);
             }
@@ -369,7 +416,7 @@ pub async fn request_structured_json_by_type(
                 .map_err(|e| AppError::InvalidState(format!("invalid anthropic response: {e}")))?;
             let content = response["content"]
                 .as_array()
-                .and_then(|arr| arr.first())
+                .and_then(|arr| arr.iter().find(|block| block["type"] == "text"))
                 .and_then(|block| block["text"].as_str())
                 .ok_or_else(|| {
                     AppError::InvalidState("Anthropic response missing content[0].text".to_string())
@@ -386,6 +433,8 @@ pub struct ResolvedProvider {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub reasoning_effort: Option<String>,
+    pub fast: bool,
 }
 
 /// Generates minutes using a resolved provider from the model_assignments table
@@ -435,6 +484,7 @@ pub async fn generate_minutes_with_resolved(
         &system_prompt,
         &user_prompt,
         &minutes_schema(),
+        resolved.reasoning_effort.as_deref(), resolved.fast,
     )
     .await?;
     let valid_segment_ids = final_segments
@@ -495,6 +545,7 @@ pub async fn edit_minutes_item_text_with_resolved(
         system_prompt,
         &user_prompt,
         &edit_schema(),
+        resolved.reasoning_effort.as_deref(), resolved.fast,
     )
     .await?;
     let edited: EditedText = serde_json::from_str(&content).map_err(|error| {
@@ -605,10 +656,11 @@ pub async fn ask_note(
     question: &str,
     segments: &[TranscriptSegment],
     minutes: Option<&MinutesDraft>,
+    options: Option<&ModelOptions<'_>>,
 ) -> AppResult<AskAnswer> {
     let user_prompt = ask_question_prompt(question, segments, minutes)?;
     let content =
-        request_structured_json(provider, ASK_SYSTEM_PROMPT, &user_prompt, ask_schema()).await?;
+        request_structured_json(provider, ASK_SYSTEM_PROMPT, &user_prompt, ask_schema(), options).await?;
     Ok(parse_ask_response(&content, segments))
 }
 
@@ -628,6 +680,7 @@ pub async fn ask_note_with_resolved(
         ASK_SYSTEM_PROMPT,
         &user_prompt,
         &ask_schema(),
+        resolved.reasoning_effort.as_deref(), resolved.fast,
     )
     .await?;
     Ok(parse_ask_response(&content, segments))

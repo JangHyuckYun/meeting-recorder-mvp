@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CaptionTimeline, SpeakerTracks, WavVisualizer } from "@/components/canvas";
 import type { CaptionSpan, CaptionState, SpeakerTrack } from "@/components/canvas";
 import { Badge, Button } from "@/components/ui";
@@ -69,6 +69,7 @@ export function LiveRecordingScreen() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const { segments } = useCaptionEvents();
+  const startingSegmentIds = useRef(new Set<string>());
 
   const orderedSegments = useMemo(
     () => Array.from(segments.values()).sort((a, b) => a.start_sample - b.start_sample),
@@ -104,6 +105,7 @@ export function LiveRecordingScreen() {
       setRecording(nextRecording);
       setTitle(recordingTitle);
       setElapsedMs(0);
+      startingSegmentIds.current = new Set(segments.keys());
       setStartedAt(Date.now());
       setIsRecording(true);
     } catch (invokeError) {
@@ -118,7 +120,9 @@ export function LiveRecordingScreen() {
     setError(null);
 
     try {
-      const completedRecording = await appClient.stopRecording();
+      const completedRecording = await appClient.stopRecording(
+        orderedSegments.filter((segment) => !startingSegmentIds.current.has(segment.segment_id)),
+      );
       setRecording(completedRecording);
       setElapsedMs(completedRecording.duration_ms ?? elapsedMs);
       setIsRecording(false);

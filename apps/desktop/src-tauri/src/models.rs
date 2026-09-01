@@ -324,6 +324,8 @@ pub struct ModelAssignment {
     pub provider_id: Uuid,
     /// The actual model name (e.g. "gpt-4o", "claude-sonnet-4-20250514").
     pub model_name: String,
+    pub reasoning_effort: Option<String>,
+    pub fast: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -376,6 +378,8 @@ pub struct ModelAssignmentInput {
     pub purpose: String,
     pub provider_id: String,
     pub model_name: String,
+    pub reasoning_effort: Option<String>,
+    pub fast: bool,
 }
 
 /// Lightweight DTO for the frontend provider list (no api_key, no models_json full).
@@ -397,6 +401,7 @@ pub struct AppSettings {
     pub llm_provider: LlmProvider,
     pub stt_server_url: Option<String>,
     pub stt_engine: SttEngine,
+    pub speakers: Option<u32>,
     pub elevenlabs_api_key_masked: Option<String>,
 }
 
@@ -406,6 +411,7 @@ impl Default for AppSettings {
             llm_provider: LlmProvider::Litellm,
             stt_server_url: Some("ws://192.168.1.189:9090".to_string()),
             stt_engine: SttEngine::SelfHosted,
+            speakers: None,
             elevenlabs_api_key_masked: None,
         }
     }

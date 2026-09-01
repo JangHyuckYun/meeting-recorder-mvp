@@ -392,6 +392,11 @@ impl Storage {
             .as_deref()
             .and_then(crate::models::SttEngine::from_db_str)
             .unwrap_or_default();
+        let speakers = self
+            .get_setting("speakers")
+            .await?
+            .and_then(|value| value.parse().ok())
+            .filter(|value| *value > 0);
         let elevenlabs_api_key_masked = self
             .elevenlabs_api_key()
             .await?
@@ -400,6 +405,7 @@ impl Storage {
             llm_provider,
             stt_server_url,
             stt_engine,
+            speakers,
             elevenlabs_api_key_masked,
         })
     }
@@ -567,17 +573,23 @@ impl Storage {
     pub async fn get_assigned_provider_model(
         &self,
         purpose: &str,
-    ) -> AppResult<Option<(Uuid, String)>> {
+    ) -> AppResult<Option<(Uuid, String, Option<String>, bool)>> {
         let row =
-            sqlx::query("SELECT provider_id, model_name FROM model_assignments WHERE purpose = ?1")
+            sqlx::query("SELECT provider_id, model_name, reasoning_effort, fast FROM model_assignments WHERE purpose = ?1")
                 .bind(purpose)
                 .fetch_optional(&self.pool)
                 .await?;
         Ok(row.map(|r| {
             let pid =
                 Uuid::parse_str(r.get::<String, _>("provider_id").as_str()).unwrap_or_default();
-            (pid, r.get::<String, _>("model_name"))
+            (pid, r.get::<String, _>("model_name"), r.get("reasoning_effort"), r.get::<i64, _>("fast") != 0)
         }))
+    }
+
+    pub async fn provider_connection(&self, id: Uuid) -> AppResult<Option<(String, String, String)>> {
+        let row = sqlx::query("SELECT provider_type, base_url, api_key_masked FROM providers WHERE id = ?1")
+            .bind(id.to_string()).fetch_optional(&self.pool).await?;
+        Ok(row.map(|r| (r.get("provider_type"), r.get("base_url"), r.get("api_key_masked"))))
     }
 
     pub async fn get_provider(
@@ -596,20 +608,24 @@ impl Storage {
         purpose: &str,
         provider_id: &str,
         model_name: &str,
+        reasoning_effort: Option<&str>,
+        fast: bool,
     ) -> AppResult<()> {
         sqlx::query(
-            "INSERT INTO model_assignments (purpose, provider_id, model_name) VALUES (?1, ?2, ?3) ON CONFLICT(purpose) DO UPDATE SET provider_id = excluded.provider_id, model_name = excluded.model_name",
+            "INSERT INTO model_assignments (purpose, provider_id, model_name, reasoning_effort, fast) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(purpose) DO UPDATE SET provider_id = excluded.provider_id, model_name = excluded.model_name, reasoning_effort = excluded.reasoning_effort, fast = excluded.fast",
         )
         .bind(purpose)
         .bind(provider_id)
         .bind(model_name)
+        .bind(reasoning_effort)
+        .bind(fast as i64)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
     pub async fn list_model_assignments(&self) -> AppResult<Vec<crate::models::ModelAssignment>> {
-        let rows = sqlx::query("SELECT purpose, provider_id, model_name FROM model_assignments")
+        let rows = sqlx::query("SELECT purpose, provider_id, model_name, reasoning_effort, fast FROM model_assignments")
             .fetch_all(&self.pool)
             .await?;
         Ok(rows.iter().map(row_to_assignment).collect())
@@ -700,6 +716,8 @@ fn row_to_assignment(row: &sqlx::sqlite::SqliteRow) -> crate::models::ModelAssig
         provider_id: Uuid::parse_str(row.get::<String, _>("provider_id").as_str())
             .unwrap_or_default(),
         model_name: row.get("model_name"),
+        reasoning_effort: row.get("reasoning_effort"),
+        fast: row.get::<i64, _>("fast") != 0,
     }
 }
 

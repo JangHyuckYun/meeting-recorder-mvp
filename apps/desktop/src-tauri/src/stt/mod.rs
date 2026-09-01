@@ -429,7 +429,13 @@ pub async fn transcribe_wav_file(
     // The server flushes final segments and closes after END_OF_AUDIO. Bound the wait in case it
     // never closes, then merge the growing segment snapshots from both connection attempts. The
     // latest version of each absolute (start, end) pair wins.
-    match tokio::time::timeout(std::time::Duration::from_secs(30), &mut reader).await {
+    let final_flush_secs = 60.max((total_ms.max(0) as u64) / 10_000);
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(final_flush_secs),
+        &mut reader,
+    )
+    .await
+    {
         Ok(join_result) => join_result
             .map_err(|error| AppError::WebSocket(format!("reader task panicked: {error}")))?,
         Err(_) => {
@@ -445,6 +451,11 @@ pub async fn transcribe_wav_file(
     let mut completed = std::collections::BTreeMap::new();
     while let Some(segment) = segment_receiver.recv().await {
         completed.insert((segment.start_ms, segment.end_ms), segment);
+    }
+    if retried {
+        eprintln!(
+            "warning: WhisperLive reconnected; merged transcript may have lost in-flight segments"
+        );
     }
     let result = completed
         .into_values()

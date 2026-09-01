@@ -31,10 +31,9 @@
   width: 26px;
   height: 26px;
   flex: none;
-  align-self: flex-start;
+  align-self: center;
   place-items: center;
   margin: calc((var(--header-height) - 26px) / 2) 0;
-  margin-left: 6px;
   color: hsl(var(--primary-foreground));
   font-family: var(--font-mono);
   font-size: 12px;
