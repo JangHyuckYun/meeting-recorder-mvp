@@ -54,7 +54,7 @@ async fn stt_engine_defaults_and_roundtrips() {
             .await
             .expect("settings should load")
             .stt_engine,
-        SttEngine::SelfHosted
+        SttEngine::Elevenlabs
     );
 
     storage
