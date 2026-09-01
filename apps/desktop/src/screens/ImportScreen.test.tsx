@@ -20,6 +20,8 @@ vi.mock("@/platform/appClient", () => ({
     cancelTranscription: vi.fn(),
     onTranscriptionProgress: vi.fn().mockResolvedValue(() => {}),
     getAppSettings: vi.fn().mockResolvedValue({ speakers: null }),
+    getActiveTranscriptions: vi.fn().mockResolvedValue([]),
+    listRecordings: vi.fn().mockResolvedValue([]),
   },
 }));
 

@@ -1,7 +1,9 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { appClient, type TranscriptionProgressEvent } from "@/platform/appClient";
+import { formatRemainingMs, estimateRemainingMs } from "../lib/transcriptionEta";
+import { importStore, useImportJob } from "../state/importStore";
 import { errorMessage } from "../formatters";
 import type { Recording } from "../types";
 
@@ -19,20 +21,15 @@ export function ImportScreen() {
   const [title, setTitle] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<Recording | null>(null);
+  const [localSuccess, setLocalSuccess] = useState<Recording | null>(null);
   const [speakerCount, setSpeakerCount] = useState("auto");
   const [language, setLanguage] = useState(LANGUAGES[0]);
-  const [progress, setProgress] = useState<TranscriptionProgressEvent | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
-  const unlistenRef = useRef<(() => void) | null>(null);
-
-  useEffect(() => {
-    appClient.onTranscriptionProgress((event) => setProgress(event)).then((unlisten) => {
-      unlistenRef.current = unlisten;
-    });
-    return () => unlistenRef.current?.();
-  }, []);
+  const importJob = useImportJob();
+  const success = importJob?.recording ?? localSuccess;
+  const progress = importJob?.progress ?? null;
+  const jobIsTranscribing = !!importJob && importJob.progress.phase !== "done";
 
   useEffect(() => {
     appClient
@@ -43,7 +40,7 @@ export function ImportScreen() {
 
   const pickFile = async () => {
     setError(null);
-    setSuccess(null);
+    setLocalSuccess(null);
     try {
       const picked = await open({
         multiple: false,
@@ -61,11 +58,11 @@ export function ImportScreen() {
     if (!selectedPath) return;
     setIsImporting(true);
     setError(null);
-    setSuccess(null);
+    setLocalSuccess(null);
     try {
       const importedTitle = title.trim() || selectedPath.split("/").pop() || selectedPath;
       const recording = await appClient.ingestAudioFile(selectedPath, importedTitle);
-      setSuccess(recording);
+      setLocalSuccess(recording);
       setSelectedPath(null);
       setTitle("");
     } catch (err) {
@@ -79,7 +76,7 @@ export function ImportScreen() {
     if (!success) return;
     setIsTranscribing(true);
     setTranscribeError(null);
-    setProgress(null);
+    importStore.start(success);
     try {
       await appClient.transcribeRecording(
         success.id,
@@ -96,6 +93,7 @@ export function ImportScreen() {
     try {
       await appClient.cancelTranscription();
     } finally {
+      importStore.reset();
       setIsTranscribing(false);
     }
   };
@@ -258,6 +256,13 @@ export function ImportScreen() {
                   />
                 </div>
                 <span className="import-progress-phase">{PHASE_LABELS[progress.phase]}</span>
+                {importJob && (
+                  <span className="import-progress-eta">
+                    {formatRemainingMs(
+                      estimateRemainingMs(importJob.samples, Date.now()),
+                    )}
+                  </span>
+                )}
               </div>
             )}
 
@@ -268,7 +273,7 @@ export function ImportScreen() {
             )}
 
             <div className="import-actions">
-              {isTranscribing ? (
+              {isTranscribing || jobIsTranscribing ? (
                 <Button variant="outline" size="sm" onClick={cancelTranscription}>
                   전사 취소
                 </Button>

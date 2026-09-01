@@ -56,6 +56,8 @@ export interface TranscriptionProgressEvent {
   phase: "sending" | "finalizing" | "done";
 }
 
+export type ActiveTranscription = TranscriptionProgressEvent;
+
 export const appClient = {
   // ── Recordings ──────────────────────────────────────────────────────
   listRecordings: () => invoke<Recording[]>("list_recordings"),
@@ -69,6 +71,7 @@ export const appClient = {
   transcribeRecording: (id: string, speakers?: number | null) =>
     invoke<TranscriptSegment[]>("transcribe_recording", { id, speakers }),
   cancelTranscription: () => invoke<void>("cancel_transcription"),
+  getActiveTranscriptions: () => invoke<ActiveTranscription[]>("get_active_transcriptions"),
   updateRecordingStatus: (id: string, status: string) =>
     invoke<void>("update_recording_status", { id, status }),
   deleteRecording: (id: string) => invoke<void>("delete_recording", { id }),

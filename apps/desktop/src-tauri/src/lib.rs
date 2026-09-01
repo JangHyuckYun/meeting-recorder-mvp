@@ -12,6 +12,7 @@ use commands::AppState;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::collections::HashMap;
 use storage::Storage;
 use tauri::Manager;
 
@@ -37,6 +38,7 @@ pub fn run() {
                     storage,
                     capture: Mutex::new(None),
                     transcription_cancel: Arc::new(AtomicBool::new(false)),
+                    active_transcriptions: Arc::new(Mutex::new(HashMap::new())),
                 });
             });
             Ok(())
@@ -79,6 +81,7 @@ pub fn run() {
             commands::set_model_assignment,
             commands::list_remote_models,
             commands::cancel_transcription,
+            commands::get_active_transcriptions,
             commands::update_recording_status,
         ])
         .run(tauri::generate_context!())
