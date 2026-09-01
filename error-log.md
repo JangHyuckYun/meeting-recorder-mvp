@@ -40,3 +40,20 @@
 - **증상**: job JSON은 `running/editing`인데 로그는 08:05에서 멈춤, 해당 worktree cwd의 codex 프로세스 없음. 작업물은 이미 완성 상태였음.
 - **원인**: 사고 3 정리 중 `pkill`로 함께 종료된 것으로 추정. job 상태 파일은 프로세스가 죽어도 갱신되지 않는다.
 - **규칙**: codex 대기는 job JSON만 보지 말고 **로그 마지막 타임스탬프 + `pgrep`/`lsof` cwd**를 같이 본다. 로그가 5분 이상 멈추면 죽은 것으로 간주하고 worktree 상태를 직접 검증(tsc/vitest/cargo)해 이어간다. 끝난 codex 프로세스(예: note)는 잡 완료 확인 후 `pkill -f <worktree경로>`로 정리한다.
+
+### 8. codex가 이미 적용된 마이그레이션(0004)을 수정
+- **증상**: 설정 브랜치 diff에 `0004_stt_engine.sql` 변경이 포함(시드값 self_hosted→elevenlabs).
+- **영향**: 머지됐다면 모든 기존 DB가 `VersionMismatch(4)`로 기동 불가.
+- **규칙**: codex 프롬프트에 "기존 마이그레이션 파일 수정 금지, 새 번호로만"을 항상 넣고, PR 전 `git status`에서 `migrations/` 아래 `M`(수정) 항목이 있으면 무조건 되돌린다. (규칙 5의 강화판)
+
+### 9. codex 샌드박스는 worktree 밖(공유 cargo target)에 쓸 수 없다
+- **증상**: `cargo check`가 `.cargo-build-lock` 생성 실패로 중단되거나(정직한 경우), 규칙을 어기고 `/tmp`에 새 target을 만들어 풀빌드(사고 3).
+- **규칙**: worktree에서 도는 codex에는 **cargo를 아예 실행시키지 않는다**("Do NOT run cargo"). Rust 검증은 오케스트레이터가 공유 `CARGO_TARGET_DIR`로 직접 돌린다. 프론트(tsc/vitest)만 codex에 맡긴다.
+
+### 10. 스택 PR 3개를 각각만 검증하고 통합 검증을 안 함
+- **증상**: 통합 브랜치에서 AppState 필드 충돌(#3/#4)과 기존 테스트의 옛 기본값 단정(`SelfHosted`)이 드러남. 개별 PR은 모두 초록이었다.
+- **규칙**: 같은 파일(AppState, invoke_handler, CHANGELOG)을 건드리는 PR이 2개 이상이면 머지 전에 로컬 통합 브랜치를 만들어 tsc/vitest/cargo test를 한 번 더 돌린다. 기본값을 바꾸는 변경은 `rg`로 옛 값을 단정하는 테스트를 먼저 찾는다.
+
+### 11. 사용자 데이터(용어집)의 테스트 값이 실서비스 요청으로 그대로 전송돼 전사 전체 실패
+- **증상**: ElevenLabs 400 `invalid_keyword` (용어집 `ㄴㅇㅁ…`).
+- **규칙**: 외부 API로 나가는 사용자 입력은 전송 직전에 정규화하고, 선택적 파라미터(keyterms 등) 때문에 핵심 기능(전사)이 통째로 실패하지 않게 폴백을 둔다. 저장 시점(trust boundary)에서도 검증한다. — PR #5
