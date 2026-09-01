@@ -4,6 +4,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::models::{MinutesDraft, MinutesItem, Recording, RecordingStatus, TranscriptSegment};
+use crate::stt::elevenlabs::sanitize_keyterms;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
@@ -469,11 +470,7 @@ impl Storage {
     }
 
     pub async fn set_glossary(&self, terms: &[String]) -> AppResult<()> {
-        let cleaned: Vec<&str> = terms
-            .iter()
-            .map(|term| term.trim())
-            .filter(|term| !term.is_empty())
-            .collect();
+        let cleaned = sanitize_keyterms(terms);
         let json = serde_json::to_string(&cleaned).map_err(|error| {
             AppError::InvalidState(format!("failed to serialize glossary: {error}"))
         })?;

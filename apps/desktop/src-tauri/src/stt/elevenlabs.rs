@@ -62,6 +62,41 @@ fn milliseconds(seconds: Option<f64>) -> i64 {
     (seconds.unwrap_or_default() * 1000.0) as i64
 }
 
+/// Bare Hangul jamo (ㄱ, ㅏ …) are letters to Unicode but never valid keyterms on their own.
+fn is_hangul_jamo(c: char) -> bool {
+    matches!(c, '\u{1100}'..='\u{11FF}' | '\u{3131}'..='\u{318E}' | '\u{A960}'..='\u{A97F}' | '\u{D7B0}'..='\u{D7FF}')
+}
+
+pub(crate) fn sanitize_keyterms(terms: &[String]) -> Vec<String> {
+    terms
+        .iter()
+        .map(|term| term.trim())
+        .filter(|term| {
+            !term.is_empty()
+                && term.chars().count() <= 50
+                && term.chars().all(|character| !character.is_control())
+                && term
+                    .chars()
+                    .any(|character| {
+                        (character.is_alphabetic() && !is_hangul_jamo(character))
+                            || character.is_numeric()
+                    })
+        })
+        .map(str::to_owned)
+        .fold(Vec::new(), |mut terms, term| {
+            if !terms.contains(&term) {
+                terms.push(term);
+            }
+            terms
+        })
+}
+
+pub fn is_invalid_keyword_error(status: u16, body: &str) -> bool {
+    status == 400
+        && (body.contains(r#""status":"invalid_keyword""#)
+            || body.contains(r#""param":"keywords""#))
+}
+
 fn speaker_label(speaker_id: Option<&str>) -> String {
     speaker_id
         .and_then(|id| id.strip_prefix("speaker_"))
@@ -135,11 +170,7 @@ pub fn text_fields(cfg: &ElevenLabsConfig) -> Vec<(&'static str, String)> {
     if let Some(language_code) = &cfg.language_code {
         fields.push(("language_code", language_code.clone()));
     }
-    let keyterms: Vec<&String> = cfg
-        .keyterms
-        .iter()
-        .filter(|term| !term.trim().is_empty())
-        .collect();
+    let keyterms = sanitize_keyterms(&cfg.keyterms);
     if !keyterms.is_empty() {
         fields.push((
             "keyterms",
@@ -180,11 +211,24 @@ pub async fn transcribe_wav_file(
         .and_then(|name| name.to_str())
         .unwrap_or("audio.wav");
     let client = reqwest::Client::new();
-    let response = build_request(&client, cfg, file_bytes, filename)
+    let mut response = build_request(&client, cfg, file_bytes.clone(), filename)
         .send()
         .await?;
-    let status = response.status();
-    let body = response.text().await?;
+    let mut status = response.status();
+    let mut body = response.text().await?;
+
+    if is_invalid_keyword_error(status.as_u16(), &body)
+        && !sanitize_keyterms(&cfg.keyterms).is_empty()
+    {
+        eprintln!("ElevenLabs rejected keyterms; retrying transcription without them");
+        let mut retry_cfg = cfg.clone();
+        retry_cfg.keyterms.clear();
+        response = build_request(&client, &retry_cfg, file_bytes, filename)
+            .send()
+            .await?;
+        status = response.status();
+        body = response.text().await?;
+    }
 
     if !status.is_success() {
         return Err(AppError::Stt(format!(

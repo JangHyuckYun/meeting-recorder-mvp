@@ -97,6 +97,15 @@ async fn glossary_defaults_empty_and_roundtrips_dropping_blanks() {
         vec!["오르카".to_string(), "STT".to_string()]
     );
 
+    storage
+        .set_glossary(&["ㄴㅇㅁ".to_string(), " 온톨로지 ".to_string(), "온톨로지".to_string()])
+        .await
+        .expect("invalid glossary terms should be dropped");
+    assert_eq!(
+        storage.get_glossary().await.expect("glossary should reload"),
+        vec!["온톨로지".to_string()]
+    );
+
     // Corrupt values degrade to an empty glossary instead of failing transcription.
     storage
         .set_setting("glossary", "not json")
