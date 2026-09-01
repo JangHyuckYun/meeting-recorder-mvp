@@ -34,6 +34,13 @@
   text-transform: uppercase;
 }
 
+.note-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .note-header-title h1 {
   margin: 0;
   overflow: hidden;
@@ -77,6 +84,14 @@
   overflow: hidden;
 }
 
+.note-main [role="tabpanel"][hidden] {
+  display: none;
+}
+
+.note-main .note-document {
+  overflow-y: auto;
+}
+
 .note-doc-meta {
   display: flex;
   flex: none;
@@ -91,6 +106,17 @@
   flex: 1;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
+}
+
+.note-main .note-document .minutes-view {
+  height: auto;
+  flex: none;
+  overflow: visible;
+}
+
+.note-main .note-document .minutes-scroll {
+  flex: none;
+  overflow: visible;
 }
 
 .note-conversation,

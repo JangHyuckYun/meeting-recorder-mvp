@@ -6,6 +6,8 @@
 //! requiring a separate API key.
 
 use crate::error::{AppError, AppResult};
+use crate::minutes::{apply_model_options, ModelOptions};
+use crate::models::ProviderType;
 use chrono::{SecondsFormat, Utc};
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -16,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
-const DEFAULT_CODEX_MODEL: &str = "gpt-5.4-mini";
+const DEFAULT_CODEX_MODEL: &str = "gpt-5.6-terra";
 const OPENAI_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const OPENAI_CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const TOKEN_REFRESH_MARGIN_MS: u64 = 60_000;
@@ -45,6 +47,7 @@ pub(super) async fn request_structured_json(
     system_prompt: &str,
     user_prompt: &str,
     schema: &Value,
+    options: Option<&ModelOptions<'_>>,
 ) -> AppResult<String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -60,8 +63,10 @@ pub(super) async fn request_structured_json(
 
     let base_url = std::env::var("MINUTES_OAUTH_BASE_URL")
         .unwrap_or_else(|_| DEFAULT_CODEX_BASE_URL.to_string());
-    let model =
-        std::env::var("MINUTES_OAUTH_MODEL").unwrap_or_else(|_| DEFAULT_CODEX_MODEL.to_string());
+    let model = options.map_or_else(
+        || std::env::var("MINUTES_OAUTH_MODEL").unwrap_or_else(|_| DEFAULT_CODEX_MODEL.to_string()),
+        |options| options.model.to_string(),
+    );
     let endpoint = format!(
         "{}/codex/responses",
         base_url.trim_end_matches('/').trim_end_matches("/codex")
@@ -75,6 +80,30 @@ pub(super) async fn request_structured_json(
         "{system_prompt}\n\nReturn exactly one valid JSON object and no other text. Do not use Markdown fences. The object must conform to this JSON Schema:\n{schema_json}"
     );
 
+    let mut body = json!({
+        "model": model,
+        "store": false,
+        "stream": true,
+        "instructions": instructions,
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": user_prompt}]
+        }],
+        "text": {"verbosity": "low"},
+        "include": ["reasoning.encrypted_content"],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true
+    });
+    apply_model_options(
+        &mut body,
+        ProviderType::Openai,
+        options.or(Some(&ModelOptions { model: &model, reasoning_effort: None, fast: false })),
+    );
+    if let Some(effort) = options.and_then(|options| options.reasoning_effort) {
+        body["reasoning"] = json!({"effort": effort});
+        body.as_object_mut().expect("request body is an object").remove("reasoning_effort");
+    }
     let response = client
         .post(endpoint)
         .bearer_auth(&credentials.access_token)
@@ -83,21 +112,7 @@ pub(super) async fn request_structured_json(
         .header("User-Agent", "codex_cli_rs")
         .header("OpenAI-Beta", "responses=experimental")
         .header("accept", "text/event-stream")
-        .json(&json!({
-            "model": model,
-            "store": false,
-            "stream": true,
-            "instructions": instructions,
-            "input": [{
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": user_prompt}]
-            }],
-            "text": {"verbosity": "low"},
-            "include": ["reasoning.encrypted_content"],
-            "tool_choice": "auto",
-            "parallel_tool_calls": true
-        }))
+        .json(&body)
         .send()
         .await?;
     let status = response.status();

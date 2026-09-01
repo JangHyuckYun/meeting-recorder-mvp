@@ -158,11 +158,13 @@ export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreen
       <header className="note-header">
         <div className="note-header-title">
           <span className="note-eyebrow">Note</span>
-          <h1>{detail.recording.title}</h1>
+          <div className="note-title-row">
+            <h1>{detail.recording.title}</h1>
+            <span className="history-status" data-status={detail.recording.status}>
+              {STATUS_LABELS[detail.recording.status]}
+            </span>
+          </div>
         </div>
-        <span className="history-status" data-status={detail.recording.status}>
-          {STATUS_LABELS[detail.recording.status]}
-        </span>
         <div className="note-header-actions">
           <Button variant="outline" size="sm" onClick={() => onAsk(recordingId)}>
             질문하기
@@ -184,14 +186,18 @@ export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreen
 
       <div className="note-body">
         <div className="note-main">
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as NoteTab)}>
+          <Tabs
+            className="flex min-h-0 flex-1 flex-col"
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as NoteTab)}
+          >
             <TabsList>
               <TabsTrigger value="doc">한 페이지 문서</TabsTrigger>
               <TabsTrigger value="conversation">대화 기록</TabsTrigger>
               <TabsTrigger value="script">스크립트</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="doc">
+            <TabsContent className="note-document ds-scroll" value="doc">
               <p className="note-doc-meta">
                 <span data-numeric>{formatDate(detail.recording.created_at)}</span>
                 <span aria-hidden="true">·</span>

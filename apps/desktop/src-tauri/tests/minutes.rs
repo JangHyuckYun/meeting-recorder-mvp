@@ -87,7 +87,7 @@ async fn generates_grounded_minutes_through_live_litellm() {
         .map(|segment| segment.id)
         .collect::<HashSet<_>>();
 
-    let draft = generate_minutes(LlmProvider::Litellm, recording_id, &segments, None)
+    let draft = generate_minutes(LlmProvider::Litellm, recording_id, &segments, None, None)
         .await
         .expect("live LiteLLM minutes generation");
     println!(
@@ -139,6 +139,7 @@ async fn edits_single_minutes_item_via_live_litellm_preserving_identity() {
         &original,
         "고객 보고용으로 더 간결하고 격식 있게 다듬어줘",
         std::slice::from_ref(&evidence_segment),
+        None,
     )
     .await
     .expect("live LiteLLM minutes item edit");
@@ -215,7 +216,7 @@ async fn generates_grounded_minutes_through_live_oauth_provider() {
         .map(|segment| segment.id)
         .collect::<HashSet<_>>();
 
-    let draft = generate_minutes(LlmProvider::CodexOauth, recording_id, &segments, None)
+    let draft = generate_minutes(LlmProvider::CodexOauth, recording_id, &segments, None, None)
         .await
         .expect("live OAuth minutes generation");
     println!(
@@ -275,7 +276,7 @@ async fn generates_grounded_minutes_through_live_claude_oauth() {
         .map(|segment| segment.id)
         .collect::<HashSet<_>>();
 
-    let draft = generate_minutes(LlmProvider::ClaudeOauth, recording_id, &segments, None)
+    let draft = generate_minutes(LlmProvider::ClaudeOauth, recording_id, &segments, None, None)
         .await
         .expect("live Claude OAuth minutes generation");
     println!(

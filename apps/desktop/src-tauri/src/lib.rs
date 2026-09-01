@@ -77,6 +77,7 @@ pub fn run() {
             commands::delete_provider,
             commands::get_model_assignments,
             commands::set_model_assignment,
+            commands::list_remote_models,
             commands::cancel_transcription,
             commands::update_recording_status,
         ])

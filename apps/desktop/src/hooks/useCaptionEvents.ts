@@ -3,17 +3,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { CaptionEventData } from "@/types";
 
-export interface CaptionEventData {
-  segment_id: string;
-  start_sample: number;
-  end_sample: number;
-  text: string;
-  status: "absent" | "partial" | "stable" | "committed" | "revised";
-  speaker_label: string | null;
-  overlap?: { speaker_count: number; retired_label: string | null };
-  supersedes?: string[];
-}
+export type { CaptionEventData } from "@/types";
 
 export interface CaptionState {
   /** Current segment map, keyed by segment_id. */

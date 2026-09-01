@@ -45,12 +45,16 @@ export interface ModelAssignment {
   purpose: "minutes_generation" | "minutes_edit";
   provider_id: string;
   model_name: string;
+  reasoning_effort: string | null;
+  fast: boolean;
 }
 
 export interface ModelAssignmentInput {
   purpose: string;
   provider_id: string;
   model_name: string;
+  reasoning_effort: string | null;
+  fast: boolean;
 }
 
 /// A registered LLM provider as returned by list_providers.
@@ -87,7 +91,19 @@ export interface AppSettings {
   llm_provider: LlmProvider;
   stt_server_url: string | null;
   stt_engine: SttEngine;
+  speakers: number | null;
   elevenlabs_api_key_masked: string | null;
+}
+
+export interface CaptionEventData {
+  segment_id: string;
+  start_sample: number;
+  end_sample: number;
+  text: string;
+  status: "absent" | "partial" | "stable" | "committed" | "revised";
+  speaker_label: string | null;
+  overlap?: { speaker_count: number; retired_label: string | null };
+  supersedes?: string[];
 }
 
 export interface OAuthStatus {

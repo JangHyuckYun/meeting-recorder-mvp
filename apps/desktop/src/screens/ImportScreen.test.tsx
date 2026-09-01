@@ -19,6 +19,7 @@ vi.mock("@/platform/appClient", () => ({
     transcribeRecording: vi.fn().mockResolvedValue([]),
     cancelTranscription: vi.fn(),
     onTranscriptionProgress: vi.fn().mockResolvedValue(() => {}),
+    getAppSettings: vi.fn().mockResolvedValue({ speakers: null }),
   },
 }));
 
@@ -33,5 +34,9 @@ describe("ImportScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
     await waitFor(() => screen.getByRole("button", { name: "전사 시작" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "전사 시작" }));
+    const { appClient } = await import("@/platform/appClient");
+    await waitFor(() => expect(appClient.transcribeRecording).toHaveBeenCalledWith("rec-1", null));
   });
 });

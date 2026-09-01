@@ -28,12 +28,12 @@ const BUILTIN_PROVIDER_MAP: Record<string, { name: string; type: string; models:
   "00000000-0000-0000-0000-000000000001": {
     name: "ChatGPT 구독 (Codex OAuth)",
     type: "openai",
-    models: ["gpt-4o", "gpt-4.1-mini", "gpt-4.1-nano"],
+    models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-max"],
   },
   "00000000-0000-0000-0000-000000000002": {
     name: "Claude 구독 (Claude OAuth)",
     type: "anthropic",
-    models: ["claude-sonnet-4-20250514", "claude-sonnet-4", "claude-3.5-haiku"],
+    models: ["claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"],
   },
 };
 
@@ -112,7 +112,7 @@ function AddProviderForm({
   const [providerType, setProviderType] = useState("openai");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [modelsJson, setModelsJson] = useState('["gpt-4.1-mini"]');
+  const [modelsJson, setModelsJson] = useState('["gpt-5.6-terra"]');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -193,7 +193,7 @@ function AddProviderForm({
           data-numeric
           value={modelsJson}
           onChange={(e) => setModelsJson(e.target.value)}
-          placeholder='["gpt-4o", "gpt-4.1-mini"]'
+          placeholder='["gpt-5.6-terra"]'
         />
       </label>
       <div className="add-provider-actions">
@@ -219,6 +219,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // Model assignment state
   const [assignments, setAssignments] = useState<Record<string, ModelAssignment>>({});
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const [loadingModels, setLoadingModels] = useState<string | null>(null);
 
   // OAuth status (for built-in OAuth providers)
   const [oauthStatuses, setOauthStatuses] = useState<Record<string, OAuthStatus | null>>({});
@@ -226,6 +227,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // Voice / STT state
   const [sttServerUrl, setSttServerUrl] = useState("");
   const [sttEngine, setSttEngine] = useState<SttEngine>("self_hosted");
+  const [speakers, setSpeakers] = useState<number | null>(null);
   const [elevenLabsKeyMasked, setElevenLabsKeyMasked] = useState<string | null>(null);
   const [elevenLabsKeyInput, setElevenLabsKeyInput] = useState("");
   const [isSavingKey, setIsSavingKey] = useState(false);
@@ -247,6 +249,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const appSettings = await appClient.getAppSettings();
     setSttServerUrl(appSettings.stt_server_url ?? "");
     setSttEngine(appSettings.stt_engine ?? "self_hosted");
+    setSpeakers(appSettings.speakers ?? null);
     setElevenLabsKeyMasked(appSettings.elevenlabs_api_key_masked ?? null);
   };
 
@@ -350,19 +353,30 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   };
 
-  const handleUpdateAssignment = async (purpose: string, providerId: string, modelName: string) => {
+  const handleUpdateAssignment = async (purpose: string, providerId: string, modelName: string, reasoning_effort: string | null = null, fast = false) => {
     if (!providerId || !modelName) return;
     setAssignmentError(null);
     try {
-      const input: ModelAssignmentInput = { purpose, provider_id: providerId, model_name: modelName };
+      const input: ModelAssignmentInput = { purpose, provider_id: providerId, model_name: modelName, reasoning_effort, fast };
       await appClient.setModelAssignment(input);
       setAssignments((prev) => ({
         ...prev,
-        [purpose]: { purpose: purpose as ModelAssignment["purpose"], provider_id: providerId, model_name: modelName },
+        [purpose]: { purpose: purpose as ModelAssignment["purpose"], provider_id: providerId, model_name: modelName, reasoning_effort, fast },
       }));
     } catch (e) {
       setAssignmentError(errorMessage(e));
     }
+  };
+
+  const handleLoadModels = async (providerId: string) => {
+    setLoadingModels(providerId);
+    try {
+      const models = await appClient.listRemoteModels(providerId);
+      setProviders((prev) => prev.map((p) => p.id === providerId ? { ...p, models } : p));
+      const provider = providers.find((p) => p.id === providerId);
+      if (provider && !provider.is_builtin) await appClient.updateProvider({ id: provider.id, name: provider.name, provider_type: provider.provider_type, base_url: provider.base_url, api_key: "", models_json: JSON.stringify(models) });
+    } catch (e) { setProviderError(errorMessage(e)); }
+    finally { setLoadingModels(null); }
   };
 
   const handleSaveElevenLabsKey = async () => {
@@ -413,6 +427,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           llm_provider: "codex_oauth" as LlmProvider,
           stt_server_url: sttServerUrl || null,
           stt_engine: sttEngine,
+          speakers,
           elevenlabs_api_key_masked: elevenLabsKeyMasked,
         } satisfies AppSettings);
         onClose();
@@ -432,6 +447,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       ? `${BUILTIN_PROVIDER_MAP[p.id]?.name ?? p.name} (기본)`
       : p.name,
     models: p.models.length > 0 ? p.models : (BUILTIN_PROVIDER_MAP[p.id]?.models ?? []),
+    provider_type: p.provider_type,
   }));
 
   if (!open) return null;
@@ -583,6 +599,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                               </Button>
                             </div>
                           )}
+                          <Button variant="ghost" size="sm" onClick={() => void handleLoadModels(provider.id)} disabled={loadingModels === provider.id}>
+                            {loadingModels === provider.id ? "불러오는 중..." : "모델 불러오기"}
+                          </Button>
                         </div>
                       );
                     })}
@@ -647,6 +666,19 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                               ))}
                             </select>
                           )}
+                          {selectedProviderId && (() => {
+                            const anthropic = selectedProvider?.provider_type === "anthropic";
+                            const model = current?.model_name ?? "";
+                            const maxAllowed = model.startsWith("gpt-5.6");
+                            const efforts = anthropic ? ["", "low", "medium", "high", "xhigh", "max"] : ["", "none", "low", "medium", "high", ...(maxAllowed ? ["xhigh", "max"] : [])];
+                            const fastAllowed = selectedProvider?.provider_type === "openai" || selectedProvider?.provider_type === "openai_compatible" || (anthropic && (model.startsWith("claude-opus-5") || model === "claude-opus-4-8"));
+                            return <>
+                              <select className="settings-select" aria-label={`${label} Reasoning`} value={current?.reasoning_effort ?? ""} onChange={(e) => void handleUpdateAssignment(purpose, selectedProviderId, model, e.target.value || null, current?.fast ?? false)}>
+                                {efforts.map((e) => <option key={e} value={e}>{e || (anthropic ? "없음" : "none")}</option>)}
+                              </select>
+                              <label><input type="checkbox" checked={fastAllowed && (current?.fast ?? false)} disabled={!fastAllowed} onChange={(e) => void handleUpdateAssignment(purpose, selectedProviderId, model, current?.reasoning_effort ?? null, e.target.checked)} /> Fast</label>
+                            </>;
+                          })()}
                         </div>
                       </div>
                     );
@@ -746,6 +778,23 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                       onChange={(e) => setSttServerUrl(e.target.value)}
                       placeholder="ws://192.168.1.189:9090"
                     />
+                  </label>
+                  <label className="settings-row">
+                    <span className="settings-row-label">화자 수</span>
+                    <select
+                      className="settings-select"
+                      value={speakers ?? "auto"}
+                      onChange={(e) =>
+                        setSpeakers(e.target.value === "auto" ? null : Number(e.target.value))
+                      }
+                    >
+                      <option value="auto">자동</option>
+                      {Array.from({ length: 9 }, (_, index) => index + 2).map((count) => (
+                        <option key={count} value={count}>
+                          {count}명
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </div>
 

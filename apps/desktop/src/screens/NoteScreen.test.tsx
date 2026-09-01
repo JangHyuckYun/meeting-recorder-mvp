@@ -1,6 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { NoteScreen } from "./NoteScreen";
+
+const noteStyles = readFileSync("src/styles/note.css", "utf8");
 
 vi.mock("@/platform/appClient", () => ({
   appClient: {
@@ -41,5 +44,25 @@ describe("NoteScreen", () => {
     expect(screen.getByRole("tab", { name: "한 페이지 문서" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "대화 기록" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "스크립트" })).toBeTruthy();
+  });
+
+  it("keeps inactive tab panels out of the flex layout", async () => {
+    const { container } = render(
+      <NoteScreen recordingId="rec-1" onExport={vi.fn()} onAsk={vi.fn()} onShare={vi.fn()} />,
+    );
+
+    await within(container).findByText("결제 개편 회의");
+    fireEvent.click(within(container).getByRole("tab", { name: "스크립트" }));
+
+    const panels = container.querySelectorAll<HTMLElement>('[role="tabpanel"]');
+    const inactivePanels = [...panels].filter((panel) => panel.hidden);
+
+    expect(inactivePanels).toHaveLength(2);
+    for (const panel of inactivePanels) {
+      expect(getComputedStyle(panel).display).toBe("none");
+    }
+    expect(noteStyles).toMatch(
+      /\.note-main\s+\[role="tabpanel"\]\[hidden\]\s*\{[^}]*display:\s*none;/s,
+    );
   });
 });

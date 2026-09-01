@@ -92,7 +92,7 @@ async fn delete_user_provider_cascades_assignments() {
 
     // Set an assignment pointing to this provider
     storage
-        .set_model_assignment("minutes_generation", &id.to_string(), "qwen-72b")
+        .set_model_assignment("minutes_generation", &id.to_string(), "qwen-72b", None, false)
         .await
         .expect("set_model_assignment should succeed");
 
@@ -139,7 +139,13 @@ async fn model_assignment_set_and_list() {
         .expect("codex builtin provider should exist");
 
     storage
-        .set_model_assignment("minutes_generation", &codex.id.to_string(), "gpt-4.1-mini")
+        .set_model_assignment(
+            "minutes_generation",
+            &codex.id.to_string(),
+            "gpt-4.1-mini",
+            Some("high"),
+            true,
+        )
         .await
         .expect("set_model_assignment should succeed");
 
@@ -154,6 +160,7 @@ async fn model_assignment_set_and_list() {
 
     assert_eq!(gen.provider_id, codex.id);
     assert_eq!(gen.model_name, "gpt-4.1-mini");
+    assert_eq!((gen.reasoning_effort.as_deref(), gen.fast), (Some("high"), true));
 }
 
 /// Built-in providers cannot be deleted.
