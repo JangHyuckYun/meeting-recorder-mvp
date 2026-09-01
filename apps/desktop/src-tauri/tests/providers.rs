@@ -45,6 +45,7 @@ async fn add_and_list_user_provider_roundtrip() {
             provider_type: "openai".into(),
             base_url: "https://api.openai.com/v1".into(),
             api_key: "sk-proj-my-real-key".into(),
+            auth_mode: "oauth".into(),
             models_json: r#"["gpt-4o","gpt-4.1-mini"]"#.into(),
         })
         .await
@@ -62,6 +63,7 @@ async fn add_and_list_user_provider_roundtrip() {
     assert_eq!(added.name, "My OpenAI Key");
     assert_eq!(added.provider_type, "openai");
     assert_eq!(added.base_url, "https://api.openai.com/v1");
+    assert_eq!(added.auth_mode, "oauth");
     // api_key should be masked when listed
     assert!(added.api_key_masked.starts_with("sk-proj-"), "key should be masked: {}", added.api_key_masked);
     assert!(added.api_key_masked.contains("…"), "key should contain ellipsis: {}", added.api_key_masked);
@@ -85,6 +87,7 @@ async fn delete_user_provider_cascades_assignments() {
             provider_type: "openai_compatible".into(),
             base_url: "http://localhost:8000/v1".into(),
             api_key: "".into(),
+            auth_mode: "api_key".into(),
             models_json: r#"["qwen-72b"]"#.into(),
         })
         .await

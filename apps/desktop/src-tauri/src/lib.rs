@@ -37,6 +37,7 @@ pub fn run() {
                     storage,
                     capture: Mutex::new(None),
                     transcription_cancel: Arc::new(AtomicBool::new(false)),
+                    oauth_login: Mutex::new(None),
                 });
             });
             Ok(())
@@ -71,6 +72,7 @@ pub fn run() {
             commands::set_glossary,
             commands::get_oauth_status,
             commands::start_oauth_login,
+            commands::complete_oauth_login,
             commands::list_providers,
             commands::add_provider,
             commands::update_provider,

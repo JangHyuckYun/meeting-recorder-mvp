@@ -16,13 +16,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
 
 pub struct AppState {
     pub storage: Storage,
     pub capture: Mutex<Option<(Uuid, CaptureSession)>>,
     pub transcription_cancel: Arc<AtomicBool>,
+    pub oauth_login: Mutex<Option<crate::minutes::oauth_login::PendingLogin>>,
 }
 
 fn recordings_dir(app: &AppHandle) -> AppResult<PathBuf> {
@@ -351,7 +351,7 @@ pub async fn generate_minutes(
         if let Some(provider) = state.storage.get_provider(provider_id).await? {
             // Built-in OAuth providers use CLI credentials, not direct API keys.
             // Route them through the existing OAuth path.
-            if provider.is_builtin {
+            if provider.is_builtin || provider.auth_mode == "oauth" {
                 let options = minutes::ModelOptions { model: &model_name, reasoning_effort: reasoning_effort.as_deref(), fast };
                 let llm = match provider.provider_type.as_str() {
                     "openai" => LlmProvider::CodexOauth,
@@ -364,7 +364,7 @@ pub async fn generate_minutes(
                 return Ok(draft);
             }
 
-            let (provider_type, base_url, api_key) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
+            let (provider_type, base_url, api_key, _auth_mode) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
             let resolved = ResolvedProvider {
                 provider_type: crate::models::ProviderType::from_db_str(&provider_type)
                     .unwrap_or(crate::models::ProviderType::OpenaiCompatible),
@@ -581,7 +581,7 @@ pub async fn ask_note(
         .await?
     {
         if let Some(provider) = state.storage.get_provider(provider_id).await? {
-            if provider.is_builtin {
+            if provider.is_builtin || provider.auth_mode == "oauth" {
                 let options = minutes::ModelOptions { model: &model_name, reasoning_effort: reasoning_effort.as_deref(), fast };
                 let llm = match provider.provider_type.as_str() {
                     "openai" => LlmProvider::CodexOauth,
@@ -590,7 +590,7 @@ pub async fn ask_note(
                 };
                 return minutes::ask_note(llm, &question, &segments, minutes, Some(&options)).await;
             }
-            let (provider_type, base_url, api_key) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
+            let (provider_type, base_url, api_key, _auth_mode) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
             let resolved = minutes::ResolvedProvider {
                 provider_type: crate::models::ProviderType::from_db_str(&provider_type)
                     .unwrap_or(crate::models::ProviderType::OpenaiCompatible),
@@ -706,27 +706,14 @@ pub async fn get_oauth_status(
 /// `oauth-login-done`.
 #[tauri::command]
 pub async fn start_oauth_login(
-    app: AppHandle,
+    state: State<'_, AppState>,
     provider: String,
-    method: Option<String>,
-) -> AppResult<String> {
-    let (binary, args): (&str, Vec<&str>) = match provider.as_str() {
-        "codex_oauth" => {
-            let use_device = method.as_deref() == Some("device");
-            if use_device {
-                ("codex", vec!["login", "--device-auth"])
-            } else {
-                ("codex", vec!["login"])
-            }
-        }
-        "claude_oauth" => ("claude", vec!["auth", "login"]),
-        other => {
-            return Err(AppError::InvalidState(format!(
-                "unknown oauth provider `{other}`; expected `codex_oauth` or `claude_oauth`"
-            )))
-        }
-    };
+)
+    -> AppResult<crate::minutes::oauth_login::AuthorizeResponse> {
+    crate::minutes::oauth_login::start(&state.oauth_login, &provider).await
+}
 
+/*
     let app_clone = app.clone();
     let provider_clone = provider.clone();
     tokio::spawn(async move {
@@ -822,7 +809,15 @@ pub async fn start_oauth_login(
         }
     });
 
-    Ok(format!("Spawning `{binary}` login flow…"))
+    Ok(format!("Spawning `{binary}` login flow…"))*/
+
+#[tauri::command]
+pub async fn complete_oauth_login(
+    state: State<'_, AppState>,
+    provider: String,
+    code_or_redirect_url: Option<String>,
+) -> AppResult<crate::minutes::oauth_status::OAuthStatus> {
+    crate::minutes::oauth_login::complete(&state.oauth_login, &provider, code_or_redirect_url).await
 }
 
 #[tauri::command]
@@ -864,7 +859,7 @@ pub async fn edit_minutes_item(
         .await?
     {
         if let Some(provider) = state.storage.get_provider(provider_id).await? {
-            if provider.is_builtin {
+            if provider.is_builtin || provider.auth_mode == "oauth" {
                 let options = minutes::ModelOptions { model: &model_name, reasoning_effort: reasoning_effort.as_deref(), fast };
                 let llm = match provider.provider_type.as_str() {
                     "openai" => LlmProvider::CodexOauth,
@@ -875,7 +870,7 @@ pub async fn edit_minutes_item(
                     .await?
             } else {
                 use crate::minutes::ResolvedProvider;
-                let (provider_type, base_url, api_key) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
+                let (provider_type, base_url, api_key, _auth_mode) = state.storage.provider_connection(provider_id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
                 let resolved = ResolvedProvider {
                     provider_type: crate::models::ProviderType::from_db_str(
                         &provider_type,
@@ -987,7 +982,7 @@ pub async fn set_model_assignment(
 #[tauri::command]
 pub async fn list_remote_models(state: State<'_, AppState>, provider_id: String) -> AppResult<Vec<String>> {
     let id = Uuid::parse_str(&provider_id).map_err(|e| AppError::InvalidState(format!("bad provider id: {e}")))?;
-    let (provider_type, base_url, api_key) = state.storage.provider_connection(id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
+    let (provider_type, base_url, api_key, _auth_mode) = state.storage.provider_connection(id).await?.ok_or_else(|| AppError::NotFound("provider not found".into()))?;
     let endpoint = format!("{}/v1/models", if base_url.trim().is_empty() { if provider_type == "anthropic" { "https://api.anthropic.com" } else { "https://api.openai.com" } } else { base_url.trim_end_matches('/').trim_end_matches("/v1") });
     let client = reqwest::Client::new();
     let mut request = client.get(endpoint);
