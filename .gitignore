@@ -47,3 +47,6 @@ logs/
 ngrok.yml
 cloudflared/
 dist-qa/
+
+# local agent plans/drafts - never commit
+.omo/
