@@ -119,29 +119,12 @@
   overflow: visible;
 }
 
-.note-conversation,
-.note-script {
+.note-conversation {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius-lg);
-}
-
-.note-script {
-  padding: 16px 20px;
-}
-
-.note-script p {
-  margin: 0 0 10px;
-  color: hsl(var(--foreground));
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.note-script p strong {
-  margin-right: 6px;
-  color: hsl(var(--primary-soft-foreground));
 }
 
 /* ---- sidebar ---------------------------------------------------------- */

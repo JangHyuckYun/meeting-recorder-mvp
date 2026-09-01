@@ -4,6 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import { NoteScreen } from "./NoteScreen";
 
 const noteStyles = readFileSync("src/styles/note.css", "utf8");
+const { generateMinutes } = vi.hoisted(() => ({
+  generateMinutes: vi.fn().mockResolvedValue({
+    recording_id: "rec-1",
+    summary: "요약",
+    decisions: [],
+    action_items: [],
+  }),
+}));
 
 vi.mock("@/platform/appClient", () => ({
   appClient: {
@@ -31,19 +39,37 @@ vi.mock("@/platform/appClient", () => ({
     ]),
     getMinutes: vi.fn().mockResolvedValue(null),
     getSpeakerNames: vi.fn().mockResolvedValue({}),
+    listTemplates: vi.fn().mockResolvedValue([
+      { id: "tpl-1", name: "프로젝트 회의", content: "결정사항\n액션 아이템" },
+    ]),
+    generateMinutes,
   },
 }));
 
 describe("NoteScreen", () => {
-  it("renders the recording title and 3 view tabs", async () => {
+  it("renders the recording title, template options, and remaining tabs", async () => {
     render(
       <NoteScreen recordingId="rec-1" onExport={vi.fn()} onAsk={vi.fn()} onShare={vi.fn()} />,
     );
 
     expect(await screen.findByText("결제 개편 회의")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "한 페이지 문서" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "대화 기록" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "스크립트" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "대화 기록(스크립트)" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "스크립트" })).toBeNull();
+    expect(screen.getByRole("option", { name: "기본" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "프로젝트 회의" })).toBeTruthy();
+  });
+
+  it("passes the selected template to minutes generation", async () => {
+    render(
+      <NoteScreen recordingId="rec-1" onExport={vi.fn()} onAsk={vi.fn()} onShare={vi.fn()} />,
+    );
+
+    const select = await screen.findByRole("combobox", { name: "회의록 템플릿" });
+    fireEvent.change(select, { target: { value: "tpl-1" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "회의록 생성" })[0]);
+
+    expect(generateMinutes).toHaveBeenCalledWith("rec-1", "tpl-1");
   });
 
   it("keeps inactive tab panels out of the flex layout", async () => {
@@ -52,12 +78,12 @@ describe("NoteScreen", () => {
     );
 
     await within(container).findByText("결제 개편 회의");
-    fireEvent.click(within(container).getByRole("tab", { name: "스크립트" }));
+    fireEvent.click(within(container).getByRole("tab", { name: "대화 기록(스크립트)" }));
 
     const panels = container.querySelectorAll<HTMLElement>('[role="tabpanel"]');
     const inactivePanels = [...panels].filter((panel) => panel.hidden);
 
-    expect(inactivePanels).toHaveLength(2);
+    expect(inactivePanels).toHaveLength(1);
     for (const panel of inactivePanels) {
       expect(getComputedStyle(panel).display).toBe("none");
     }

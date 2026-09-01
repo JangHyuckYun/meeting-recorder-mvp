@@ -1,9 +1,10 @@
-/** S4 — Note detail. 3-view tabs (one-page doc / conversation / raw script),
+/** S4 — Note detail. 2-view tabs (one-page doc / conversation),
  * speaker rename, minutes with decisions/action-items + evidence, and
  * Export/Ask/Share actions. Contract: NoteScreen({ recordingId, onExport, onAsk, onShare }). */
 import { useEffect, useMemo, useState } from "react";
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
 import { appClient } from "@/platform/appClient";
+import type { Template } from "@/platform/appClient";
 import { MinutesView } from "../components/MinutesView";
 import { errorMessage, formatDate, formatDuration, STATUS_LABELS } from "../formatters";
 import "../styles/note.css";
@@ -22,12 +23,14 @@ interface RecordingDetail {
   segments: TranscriptSegment[];
 }
 
-type NoteTab = "doc" | "conversation" | "script";
+type NoteTab = "doc" | "conversation";
 
 export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreenProps) {
   const [detail, setDetail] = useState<RecordingDetail | null>(null);
   const [minutesDraft, setMinutesDraft] = useState<MinutesDraft | null>(null);
   const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,18 +45,22 @@ export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreen
     setError(null);
     setMinutesDraft(null);
     setDetail(null);
+    setTemplates([]);
+    setSelectedTemplateId("");
     setActiveTab("doc");
     (async () => {
       try {
-        const [[recording, segments], minutes, names] = await Promise.all([
+        const [[recording, segments], minutes, names, templates] = await Promise.all([
           appClient.getRecordingDetail(recordingId),
           appClient.getMinutes(recordingId),
           appClient.getSpeakerNames(recordingId),
+          appClient.listTemplates(),
         ]);
         if (cancelled) return;
         setDetail({ recording, segments });
         if (minutes) setMinutesDraft(minutes);
         setSpeakerNames(names);
+        setTemplates(templates);
       } catch (invokeError) {
         if (!cancelled) setError(errorMessage(invokeError));
       } finally {
@@ -89,7 +96,7 @@ export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreen
     setIsGeneratingMinutes(true);
     setError(null);
     try {
-      const draft = await appClient.generateMinutes(detail.recording.id);
+      const draft = await appClient.generateMinutes(detail.recording.id, selectedTemplateId || undefined);
       setMinutesDraft(draft);
     } catch (invokeError) {
       setError(errorMessage(invokeError));
@@ -193,8 +200,7 @@ export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreen
           >
             <TabsList>
               <TabsTrigger value="doc">한 페이지 문서</TabsTrigger>
-              <TabsTrigger value="conversation">대화 기록</TabsTrigger>
-              <TabsTrigger value="script">스크립트</TabsTrigger>
+              <TabsTrigger value="conversation">대화 기록(스크립트)</TabsTrigger>
             </TabsList>
 
             <TabsContent className="note-document ds-scroll" value="doc">
@@ -205,6 +211,21 @@ export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreen
                 <span aria-hidden="true">·</span>
                 <span>참석 {speakerLabels.length || 1}인</span>
               </p>
+              <label className="note-template-select">
+                회의록 템플릿
+                <select
+                  aria-label="회의록 템플릿"
+                  value={selectedTemplateId}
+                  onChange={(event) => setSelectedTemplateId(event.currentTarget.value)}
+                >
+                  <option value="">기본</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {minutesDraft ? (
                 <MinutesView
                   minutes={minutesDraft}
@@ -264,22 +285,6 @@ export function NoteScreen({ recordingId, onExport, onAsk, onShare }: NoteScreen
               </div>
             </TabsContent>
 
-            <TabsContent value="script">
-              <div className="note-script ds-scroll">
-                {detail.segments.length > 0 ? (
-                  detail.segments.map((segment) => (
-                    <p key={segment.id}>
-                      <strong>{speakerNames[segment.speaker_label] ?? segment.speaker_label}</strong>{" "}
-                      {segment.text}
-                    </p>
-                  ))
-                ) : (
-                  <div className="history-note">
-                    <h3>아직 스크립트가 없습니다</h3>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
           </Tabs>
         </div>
 
