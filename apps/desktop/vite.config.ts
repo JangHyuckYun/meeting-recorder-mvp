@@ -24,6 +24,8 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || "0.0.0.0",
+    // ngrok 등 외부 터널 도메인 허용 (dev 전용, vite 5+ 호스트 헤더 검증 우회)
+    allowedHosts: [".ngrok-free.app", ".ngrok.io", ".ngrok.app"],
     hmr: host
       ? {
           protocol: "ws",

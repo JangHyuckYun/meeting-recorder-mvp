@@ -34,3 +34,16 @@ record_test_data/
 # logs
 *.log
 logs/
+
+# local db / user data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# tooling / tunnel artifacts
+.codegraph
+ngrok.yml
+cloudflared/
+dist-qa/
