@@ -35,3 +35,8 @@
 
 ### 6. 에이전트가 `tee -` 실수로 레포에 `-` 파일 생성
 - **규칙**: PR 전 `git status --short`에서 이름이 이상한 untracked 파일(`-`, `nohup.out` 등)을 확인하고 정리한다.
+
+### 7. 죽은 codex 잡을 "running"으로 믿고 38분 대기
+- **증상**: job JSON은 `running/editing`인데 로그는 08:05에서 멈춤, 해당 worktree cwd의 codex 프로세스 없음. 작업물은 이미 완성 상태였음.
+- **원인**: 사고 3 정리 중 `pkill`로 함께 종료된 것으로 추정. job 상태 파일은 프로세스가 죽어도 갱신되지 않는다.
+- **규칙**: codex 대기는 job JSON만 보지 말고 **로그 마지막 타임스탬프 + `pgrep`/`lsof` cwd**를 같이 본다. 로그가 5분 이상 멈추면 죽은 것으로 간주하고 worktree 상태를 직접 검증(tsc/vitest/cargo)해 이어간다. 끝난 codex 프로세스(예: note)는 잡 완료 확인 후 `pkill -f <worktree경로>`로 정리한다.
