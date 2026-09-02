@@ -1,5 +1,6 @@
 use desktop_lib::stt::elevenlabs::{
-    build_request, segments_from_response, text_fields, ElevenLabsConfig, ELEVENLABS_STT_URL,
+    build_request, is_invalid_keyword_error, segments_from_response, text_fields, ElevenLabsConfig,
+    ELEVENLABS_STT_URL,
 };
 use reqwest::Method;
 use uuid::Uuid;
@@ -111,4 +112,34 @@ fn elevenlabs_keyterms_sent_as_json_array_when_set() {
     let keyterms: Vec<String> =
         serde_json::from_str(field(&fields, "keyterms").expect("keyterms field")).unwrap();
     assert_eq!(keyterms, vec!["오르카".to_string(), "STT".to_string()]);
+}
+
+#[test]
+fn elevenlabs_keyterms_drop_invalid_jamo_and_keep_valid_terms() {
+    let cfg = ElevenLabsConfig {
+        keyterms: vec![
+            "ㄴㅇㅁㄴㅇㅁㄴㅇ".to_string(),
+            " 온톨로지 ".to_string(),
+            "English 2".to_string(),
+            "온톨로지".to_string(),
+        ],
+        ..ElevenLabsConfig::default()
+    };
+    let keyterms: Vec<String> =
+        serde_json::from_str(field(&text_fields(&cfg), "keyterms").unwrap()).unwrap();
+    assert_eq!(keyterms, vec!["온톨로지", "English 2"]);
+}
+
+#[test]
+fn elevenlabs_invalid_keyword_error_detection_matches_status_or_param() {
+    assert!(is_invalid_keyword_error(
+        400,
+        r#"{"detail":{"status":"invalid_keyword"}}"#
+    ));
+    assert!(is_invalid_keyword_error(
+        400,
+        r#"{"detail":{"param":"keywords"}}"#
+    ));
+    assert!(!is_invalid_keyword_error(500, "invalid_keyword"));
+    assert!(!is_invalid_keyword_error(400, r#"{"detail":{"status":"other"}}"#));
 }
