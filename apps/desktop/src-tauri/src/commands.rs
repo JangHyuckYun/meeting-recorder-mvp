@@ -11,6 +11,7 @@ use crate::models::{
 use crate::storage::Storage;
 use crate::stt::{self, SttConfig};
 use std::path::PathBuf;
+use std::collections::HashMap;
 use std::process::Command as ShellCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -23,6 +24,12 @@ pub struct AppState {
     pub storage: Storage,
     pub capture: Mutex<Option<(Uuid, CaptureSession)>>,
     pub transcription_cancel: Arc<AtomicBool>,
+    pub active_transcriptions: Arc<Mutex<HashMap<Uuid, stt::TranscriptionProgress>>>,
+}
+
+fn emit_progress(app: &AppHandle, active: &Mutex<HashMap<Uuid, stt::TranscriptionProgress>>, progress: stt::TranscriptionProgress) {
+    active.lock().unwrap().insert(progress.recording_id, progress.clone());
+    let _ = app.emit("transcription-progress", &progress);
 }
 
 fn recordings_dir(app: &AppHandle) -> AppResult<PathBuf> {
@@ -162,6 +169,9 @@ pub async fn transcribe_recording(
         .storage
         .update_status(uuid, RecordingStatus::Transcribing)
         .await?;
+    state.active_transcriptions.lock().unwrap().insert(uuid, stt::TranscriptionProgress {
+        recording_id: uuid, sent_ms: 0, total_ms: rec.duration_ms.unwrap_or_default(), phase: stt::ProgressPhase::Sending,
+    });
     let wav_path = PathBuf::from(&rec.source_path);
 
     let result = match settings.stt_engine {
@@ -180,26 +190,20 @@ pub async fn transcribe_recording(
                     ..Default::default()
                 };
                 let total_ms = rec.duration_ms.unwrap_or_default();
-                let _ = app.emit(
-                    "transcription-progress",
-                    stt::TranscriptionProgress {
+                emit_progress(&app, &state.active_transcriptions, stt::TranscriptionProgress {
                         recording_id: uuid,
                         sent_ms: total_ms,
                         total_ms,
                         phase: stt::ProgressPhase::Finalizing,
-                    },
-                );
+                });
                 let result = stt::elevenlabs::transcribe_wav_file(&cfg, uuid, &wav_path).await;
                 if result.is_ok() {
-                    let _ = app.emit(
-                        "transcription-progress",
-                        stt::TranscriptionProgress {
+                    emit_progress(&app, &state.active_transcriptions, stt::TranscriptionProgress {
                             recording_id: uuid,
                             sent_ms: total_ms,
                             total_ms,
                             phase: stt::ProgressPhase::Done,
-                        },
-                    );
+                    });
                 }
                 result
             } else {
@@ -221,9 +225,10 @@ pub async fn transcribe_recording(
             }
             let (progress_sender, mut progress_receiver) =
                 tokio::sync::mpsc::unbounded_channel::<stt::TranscriptionProgress>();
+            let active_transcriptions = state.active_transcriptions.clone();
             tokio::spawn(async move {
                 while let Some(progress) = progress_receiver.recv().await {
-                    let _ = app.emit("transcription-progress", &progress);
+                    emit_progress(&app, &active_transcriptions, progress);
                 }
             });
 
@@ -243,6 +248,7 @@ pub async fn transcribe_recording(
     };
     match result {
         Ok(segments) => {
+            state.active_transcriptions.lock().unwrap().remove(&uuid);
             state.storage.insert_segments(&segments).await?;
             state
                 .storage
@@ -251,6 +257,7 @@ pub async fn transcribe_recording(
             Ok(segments)
         }
         Err(e) => {
+            state.active_transcriptions.lock().unwrap().remove(&uuid);
             // Check if cancelled — set status back to recorded so retry works
             if e.to_string().contains("cancelled") {
                 state
@@ -266,6 +273,13 @@ pub async fn transcribe_recording(
             Err(e)
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_active_transcriptions(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<stt::TranscriptionProgress>> {
+    Ok(state.active_transcriptions.lock().unwrap().values().cloned().collect())
 }
 
 /// Cancels the currently running transcription.

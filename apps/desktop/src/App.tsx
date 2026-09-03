@@ -29,7 +29,7 @@ interface AppProps {
 function renderScreen(route: Route, navigate: (route: Route) => void) {
   switch (route.id) {
     case "s1": // Home — notes list
-      return <HomeScreen onOpenNote={(recordingId) => navigate({ id: "s4", recordingId })} />;
+      return <HomeScreen onOpenNote={(recordingId) => navigate({ id: "s4", recordingId })} onOpenImport={() => navigate({ id: "s6" })} />;
     case "s2": // Prepare recording
       return <PrepareScreen onStart={() => navigate({ id: "s3" })} />;
     case "s3": // Live recording

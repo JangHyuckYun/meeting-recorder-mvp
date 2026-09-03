@@ -4,6 +4,8 @@ import { HomeScreen } from "./HomeScreen";
 
 vi.mock("@/platform/appClient", () => ({
   appClient: {
+    getActiveTranscriptions: vi.fn().mockResolvedValue([]),
+    onTranscriptionProgress: vi.fn().mockResolvedValue(() => {}),
     listRecordings: vi.fn().mockResolvedValue([
       {
         id: "rec-1",
@@ -31,5 +33,17 @@ describe("HomeScreen", () => {
     fireEvent.click(row);
 
     expect(onOpenNote).toHaveBeenCalledWith("rec-1");
+  });
+
+  it("redirects to import while transcription is active", async () => {
+    const { appClient } = await import("@/platform/appClient");
+    vi.mocked(appClient.getActiveTranscriptions).mockResolvedValueOnce([
+      { recording_id: "rec-1", sent_ms: 30_000, total_ms: 60_000, phase: "sending" },
+    ]);
+    const onOpenNote = vi.fn();
+    const onOpenImport = vi.fn();
+    render(<HomeScreen onOpenNote={onOpenNote} onOpenImport={onOpenImport} />);
+    expect((await screen.findAllByText(/전사 진행 중/)).length).toBeGreaterThan(0);
+    expect(onOpenImport).toHaveBeenCalled();
   });
 });

@@ -5,10 +5,12 @@ import { Button } from "@/components/ui";
 import { appClient, type Folder } from "@/platform/appClient";
 import { errorMessage, formatDate, formatDuration, STATUS_LABELS } from "../formatters";
 import type { Recording } from "../types";
+import { importStore, useImportJob } from "../state/importStore";
 
 interface HomeScreenProps {
   /** Called with a recording's id when its row is opened (navigates to S4). */
   onOpenNote: (recordingId: string) => void;
+  onOpenImport?: () => void;
 }
 
 function EmptyHome() {
@@ -20,7 +22,8 @@ function EmptyHome() {
   );
 }
 
-export function HomeScreen({ onOpenNote }: HomeScreenProps) {
+export function HomeScreen({ onOpenNote, onOpenImport }: HomeScreenProps) {
+  const importJob = useImportJob();
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -50,6 +53,14 @@ export function HomeScreen({ onOpenNote }: HomeScreenProps) {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    void importStore.hydrate().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (importJob && importJob.progress.phase !== "done") onOpenImport?.();
+  }, [importJob, onOpenImport]);
 
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -105,6 +116,12 @@ export function HomeScreen({ onOpenNote }: HomeScreenProps) {
           새로고침
         </Button>
       </header>
+
+      {importJob && importJob.progress.phase !== "done" && (
+        <div className="success-banner" role="status">
+          전사 진행 중 · {Math.round((importJob.progress.sent_ms / importJob.progress.total_ms) * 100)}%
+        </div>
+      )}
 
       <div className="home-filters">
         <input
