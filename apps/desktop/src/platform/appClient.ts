@@ -124,6 +124,8 @@ export const appClient = {
   setModelAssignment: (input: ModelAssignmentInput) => invoke<void>("set_model_assignment", { input }),
   listRemoteModels: (providerId: string) => invoke<string[]>("list_remote_models", { providerId }),
   getOAuthStatus: (provider: string) => invoke<OAuthStatus>("get_oauth_status", { provider }),
+  startOAuthLogin: (provider: "openai" | "anthropic") => invoke<{ authorize_url: string }>("start_oauth_login", { provider }),
+  completeOAuthLogin: (provider: "openai" | "anthropic", codeOrRedirectUrl?: string) => invoke<OAuthStatus>("complete_oauth_login", { provider, code_or_redirect_url: codeOrRedirectUrl }),
 };
 
 export type AppClient = typeof appClient;

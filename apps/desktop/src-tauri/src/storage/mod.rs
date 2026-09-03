@@ -486,7 +486,7 @@ impl Storage {
 
     pub async fn list_providers(&self) -> AppResult<Vec<crate::models::ProviderSummary>> {
         let rows = sqlx::query(
-            "SELECT id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at FROM providers ORDER BY is_builtin DESC, created_at ASC",
+            "SELECT id, name, provider_type, base_url, api_key_masked, auth_mode, models_json, is_active, is_builtin, created_at FROM providers ORDER BY is_builtin DESC, created_at ASC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -508,13 +508,14 @@ impl Storage {
                 AppError::InvalidState(format!("unknown provider type: {}", input.provider_type))
             })?;
         sqlx::query(
-            "INSERT INTO providers (id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 0, ?7)",
+            "INSERT INTO providers (id, name, provider_type, base_url, api_key_masked, auth_mode, models_json, is_active, is_builtin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, 0, ?8)",
         )
         .bind(id.to_string())
         .bind(&input.name)
         .bind(provider_type.as_str())
         .bind(&input.base_url)
         .bind(&input.api_key)
+        .bind(&input.auth_mode)
         .bind(&input.models_json)
         .bind(chrono::Utc::now().to_rfc3339())
         .execute(&self.pool)
@@ -544,13 +545,14 @@ impl Storage {
             input.api_key.clone()
         };
         sqlx::query(
-            "UPDATE providers SET name = ?2, provider_type = ?3, base_url = ?4, api_key_masked = ?5, models_json = ?6 WHERE id = ?1 AND is_builtin = 0",
+            "UPDATE providers SET name = ?2, provider_type = ?3, base_url = ?4, api_key_masked = ?5, auth_mode = ?6, models_json = ?7 WHERE id = ?1 AND is_builtin = 0",
         )
         .bind(id.to_string())
         .bind(&input.name)
         .bind(provider_type.as_str())
         .bind(&input.base_url)
         .bind(&api_key)
+        .bind(&input.auth_mode)
         .bind(&input.models_json)
         .execute(&self.pool)
         .await?;
@@ -586,17 +588,17 @@ impl Storage {
         }))
     }
 
-    pub async fn provider_connection(&self, id: Uuid) -> AppResult<Option<(String, String, String)>> {
-        let row = sqlx::query("SELECT provider_type, base_url, api_key_masked FROM providers WHERE id = ?1")
+    pub async fn provider_connection(&self, id: Uuid) -> AppResult<Option<(String, String, String, String)>> {
+        let row = sqlx::query("SELECT provider_type, base_url, api_key_masked, auth_mode FROM providers WHERE id = ?1")
             .bind(id.to_string()).fetch_optional(&self.pool).await?;
-        Ok(row.map(|r| (r.get("provider_type"), r.get("base_url"), r.get("api_key_masked"))))
+        Ok(row.map(|r| (r.get("provider_type"), r.get("base_url"), r.get("api_key_masked"), r.get("auth_mode"))))
     }
 
     pub async fn get_provider(
         &self,
         id: Uuid,
     ) -> AppResult<Option<crate::models::ProviderSummary>> {
-        let row = sqlx::query("SELECT id, name, provider_type, base_url, api_key_masked, models_json, is_active, is_builtin, created_at FROM providers WHERE id = ?1")
+        let row = sqlx::query("SELECT id, name, provider_type, base_url, api_key_masked, auth_mode, models_json, is_active, is_builtin, created_at FROM providers WHERE id = ?1")
             .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await?;
@@ -702,6 +704,7 @@ fn row_to_provider(row: &sqlx::sqlite::SqliteRow) -> crate::models::ProviderSumm
         provider_type: row.get::<String, _>("provider_type"),
         base_url: row.get("base_url"),
         api_key_masked: row.get("api_key_masked"),
+        auth_mode: row.get("auth_mode"),
         models,
         is_active: row.get::<i64, _>("is_active") != 0,
         is_builtin: row.get::<i64, _>("is_builtin") != 0,

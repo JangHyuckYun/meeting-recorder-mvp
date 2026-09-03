@@ -4,6 +4,7 @@ pub(crate) mod cache;
 mod claude_provider;
 mod oauth_provider;
 pub(crate) mod oauth_status;
+pub(crate) mod oauth_login;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{

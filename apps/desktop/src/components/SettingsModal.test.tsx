@@ -33,6 +33,12 @@ vi.mock("@/platform/appClient", () => ({
 afterEach(cleanup);
 
 describe("SettingsModal", () => {
+  it("selects ElevenLabs when settings say elevenlabs", async () => {
+    render(<SettingsModal open onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId("stt-engine-select")).toBeTruthy());
+    expect(screen.getByRole("button", { name: /ElevenLabs Scribe/ }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("adds a glossary term via the 단어장 tab", async () => {
     render(<SettingsModal open onClose={() => {}} />);
 

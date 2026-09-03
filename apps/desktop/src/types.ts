@@ -64,6 +64,7 @@ export interface Provider {
   provider_type: "openai" | "anthropic" | "openai_compatible";
   base_url: string;
   api_key_masked: string;
+  auth_mode: "api_key" | "oauth";
   models: string[];
   is_active: boolean;
   is_builtin: boolean;
@@ -77,6 +78,7 @@ export interface ProviderInput {
   provider_type: string;
   base_url: string;
   api_key: string;
+  auth_mode: "api_key" | "oauth";
   models_json: string;
 }
 

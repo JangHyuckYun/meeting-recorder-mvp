@@ -208,12 +208,15 @@ impl CaptionEvent {
 }
 
 /// Which STT backend transcribes recordings. Persisted in `app_settings`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SttEngine {
-    #[default]
-    SelfHosted,
     Elevenlabs,
+    SelfHosted,
+}
+
+impl Default for SttEngine {
+    fn default() -> Self { Self::Elevenlabs }
 }
 
 impl SttEngine {
@@ -280,6 +283,7 @@ pub struct Provider {
     pub base_url: String,
     /// Stored API key (masked when sent to the frontend). Empty for OAuth providers.
     pub api_key_masked: String,
+    pub auth_mode: String,
     /// Available models as a JSON array string (e.g. `["gpt-4o","gpt-4.1-mini"]`).
     pub models_json: String,
     pub is_active: bool,
@@ -369,8 +373,12 @@ pub struct ProviderInput {
     pub provider_type: String,
     pub base_url: String,
     pub api_key: String,
+    #[serde(default = "default_auth_mode")]
+    pub auth_mode: String,
     pub models_json: String,
 }
+
+fn default_auth_mode() -> String { "api_key".to_string() }
 
 /// Payload for setting a model assignment from the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,6 +398,7 @@ pub struct ProviderSummary {
     pub provider_type: String,
     pub base_url: String,
     pub api_key_masked: String,
+    pub auth_mode: String,
     pub models: Vec<String>,
     pub is_active: bool,
     pub is_builtin: bool,
@@ -410,7 +419,7 @@ impl Default for AppSettings {
         Self {
             llm_provider: LlmProvider::Litellm,
             stt_server_url: Some("ws://192.168.1.189:9090".to_string()),
-            stt_engine: SttEngine::SelfHosted,
+            stt_engine: SttEngine::Elevenlabs,
             speakers: None,
             elevenlabs_api_key_masked: None,
         }
